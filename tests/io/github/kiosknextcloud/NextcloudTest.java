@@ -19,8 +19,10 @@ public final class NextcloudTest {
 
     public static void main(String[] args) throws Exception {
         configAndXml();
+        albumConfig();
         rendererBudget();
         multipleFolders();
+        albumSources();
         previewFallback();
         try (Fixture fixture = new Fixture()) {
             webdav(fixture);
@@ -110,45 +112,163 @@ public final class NextcloudTest {
         expectFailure(() -> Renderer.photo(new byte[AndroidImageEncoder.MAX_JPEG + 1], false), "reject oversized image");
     }
 
+    static void albumConfig() throws Exception {
+        Map<String, Object> values = settings("https://cloud.example/nextcloud/");
+        values.put("albums", "ignored while using folders");
+        check(new Config(values).albums.isEmpty(), "existing configurations stay folder-only and ignore hidden album fields");
+        values.put("photoSource", "Albums");
+        values.put("folder", "invalid/../unused");
+        values.put("additionalFolders", "ignored while using albums");
+        values.put("includeSubfolders", true);
+        values.put("albums", Arrays.asList(Collections.singletonMap("name", "Holidays & été + 2026"),
+                Collections.singletonMap("name", " Holidays & été + 2026 ")));
+        Config config = new Config(values);
+        check(config.folder == null && config.folders.isEmpty() && !config.recursive, "album-only source ignores old folder settings and recursion");
+        check(config.albums.size() == 1 && config.albums.get(0).toString().equals("https://cloud.example/nextcloud/remote.php/dav/photos/alice/albums/Holidays%20&%20%C3%A9t%C3%A9%20+%202026/"), "album endpoint preserves installation prefix, encodes name and removes duplicates");
+        for (String name : Arrays.asList("", " ", ".", "..", "Holidays/2026", "https://cloud.example/album", "bad\\name")) {
+            values.put("albums", Collections.singletonList(Collections.singletonMap("name", name)));
+            expectFailure(() -> new Config(values), "reject invalid album name: " + name);
+        }
+        values.put("albums", Collections.emptyList());
+        expectFailure(() -> new Config(values), "album mode requires a selection");
+        values.put("albums", Collections.nCopies(33, Collections.singletonMap("name", "Holidays")));
+        expectFailure(() -> new Config(values), "bound album rows before parsing");
+        values.put("photoSource", "unsupported");
+        expectFailure(() -> new Config(values), "unknown source must not silently select folders");
+        values.put("photoSource", "Folders and albums");
+        values.put("folder", "Photos");
+        List<Map<String, String>> folders = new ArrayList<>();
+        for (int i = 0; i < 31; i++) folders.add(Collections.singletonMap("path", "Extra" + i));
+        values.put("additionalFolders", folders);
+        values.put("albums", Collections.singletonList(Collections.singletonMap("name", "Holidays")));
+        expectFailure(() -> new Config(values), "32-source selection limit is shared by folders and albums");
+    }
+
+    static void albumSources() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            String first = "/remote.php/dav/photos/alice/albums/Holidays & été/";
+            String second = "/remote.php/dav/photos/alice/albums/Family/";
+            AtomicBoolean updated = new AtomicBoolean();
+            java.util.function.Function<String, String> content = path -> {
+                if (path.equals(first)) return listing(entry(path, true, "", "", "collection")
+                        + entry(path + "100-beach.jpg", false, "image/jpeg", "v1", "100")
+                        + entry(path + "101-portrait.png", false, "image/png", "v1", "101")
+                        + entry(path + "200-video.mp4", false, "video/mp4", "v1", "200")
+                        + entry(path + "nested/", true, "", "", "nested")
+                        + entry(path + "nested/999.jpg", false, "image/jpeg", "v1", "999")
+                        + entry("https://evil.example/steal.jpg", false, "image/jpeg", "v1", "evil")
+                        + entry(path + "../unselected.jpg", false, "image/jpeg", "v1", "outside")
+                        + (updated.get() ? entry(path + "105-new.jpg", false, "image/jpeg", "v2", "105") : ""));
+                if (path.equals(second)) return listing(entry(path, true, "", "", "collection")
+                        + entry(path + "100-copy.jpg", false, "image/jpeg", "v1", "100")
+                        + entry(path + "102-sunset.webp", false, "image/webp", "v1", "102"));
+                if (path.equals(fixture.root)) return listing(entry(path, true, "", "", "collection")
+                        + entry(path + "original.jpg", false, "image/jpeg", "v1", "100")
+                        + entry(path + "other.jpg", false, "image/jpeg", "v1", "103")
+                        + entry(path + "sub/", true, "", "", "sub"));
+                if (path.equals(fixture.root + "sub/")) return listing(entry(path + "deep.jpg", false, "image/jpeg", "v1", "104"));
+                throw new AssertionError("Unexpected source, recursion into an album, or escaped href: " + path);
+            };
+            fixture.directoryListing = content;
+            Map<String, Object> values = settings(fixture.url());
+            values.put("photoSource", "Albums");
+            values.put("includeSubfolders", true);
+            values.put("albums", Arrays.asList(Collections.singletonMap("name", "Holidays & été"), Collections.singletonMap("name", "Family")));
+            try (DavClient client = new DavClient(new Config(values))) {
+                List<DavClient.Photo> photos = client.list();
+                check(photos.size() == 3 && fixture.propfinds.get() == 2, "album listing reads only direct supported media and deduplicates file IDs across albums");
+                check(fixture.listedPaths.stream().noneMatch(path -> path.contains("/dav/files/")), "album-only mode never lists the default Files folder");
+                for (DavClient.Photo photo : photos) check(client.download(photo).length > 0 && photo.url.encodedPath().contains("/dav/photos/"), "download directly from album DAV href without resolving physical folder");
+                int gets = fixture.gets.get();
+                for (String path : Arrays.asList("/remote.php/dav/files/alice/Elsewhere/x.jpg", "/remote.php/dav/photos/alice/albums/Secret/500.jpg", first + "nested/999.jpg")) {
+                    expectFailure(() -> client.download(new DavClient.Photo(HttpUrl.get(fixture.url() + path), "", "")), "reject download outside selected album entries");
+                }
+                check(fixture.gets.get() == gets, "out-of-scope album addresses are rejected before authentication is sent");
+                fixture.missingPaths.add(first);
+                try { client.list(); throw new AssertionError("missing album must fail"); }
+                catch (IOException expected) { check(expected.getMessage().contains("album was not found"), "missing album has an actionable Photos/name error"); }
+                fixture.missingPaths.clear();
+                fixture.mode = 302;
+                expectFailure(client::list, "album redirects are rejected");
+                check(fixture.redirectHits.get() == 0, "album credentials never follow redirects");
+                fixture.mode = 0;
+            }
+            fixture.propfinds.set(0);
+            values.put("photoSource", "Folders and albums");
+            try (DavClient client = new DavClient(new Config(values))) {
+                check(client.list().size() == 5 && fixture.propfinds.get() == 4, "mixed sources deduplicate photos, recurse into Files folders only and keep album IDs separate from filesystem IDs");
+            }
+            values.put("photoSource", "Albums");
+            Host host = new Host();
+            NextcloudPlugin plugin = new NextcloudPlugin(original -> original, () -> 1L);
+            fixture.propfinds.set(0);
+            fixture.gets.set(0);
+            plugin.start(host, values);
+            try {
+                Thread.sleep(1200);
+                check(fixture.propfinds.get() == 0 && fixture.gets.get() == 0, "album selection preserves zero idle network activity");
+                show(plugin);
+                await(() -> host.images.get() > 0 && host.status.startsWith("3 photos available"), "selected albums load into the visible screensaver");
+                updated.set(true);
+                plugin.execute("refresh", Collections.emptyMap());
+                await(() -> host.status.startsWith("4 photos available"), "refresh discovers photos added to an album without reconfiguration");
+            } finally { plugin.stop(); }
+            fixture.directoryListing = path -> listing(entry(path, true, "", ""));
+            try (DavClient client = new DavClient(new Config(values))) { check(client.list().isEmpty(), "empty albums return an empty slideshow"); }
+            fixture.directoryListing = path -> {
+                StringBuilder entries = new StringBuilder();
+                int count = path.equals(first) ? 2500 : 2501;
+                for (int i = 0; i < count; i++) entries.append(entry(path + i + ".jpg", false, "image/jpeg", "", (path.equals(first) ? "a" : "b") + i));
+                return listing(entries.toString());
+            };
+            try (DavClient client = new DavClient(new Config(values))) { expectLimit(client, "Photo limit"); }
+            check(fixture.badAuth.get() == 0 && fixture.badDepth.get() == 0 && fixture.badAgent.get() == 0, "album requests retain Basic auth, Depth 1 and versioned User-Agent");
+        }
+    }
+
     static void previewFallback() throws Exception {
         try (Fixture fixture = new Fixture()) {
             Map<String, Object> values = settings(fixture.url() + "/nextcloud/");
+            values.put("albums", Collections.singletonList(Collections.singletonMap("name", "Holidays")));
             fixture.directoryListing = path -> listing(entry(path + "42-large.jpg", false, "image/jpeg", "v1", "42"));
-            Config config = new Config(values);
-            try (DavClient client = new DavClient(config)) {
-                DavClient.Photo photo = client.list().get(0);
-                int previews = fixture.previewGets.get();
-                check(client.download(photo).length == 3 && fixture.previewGets.get() == previews, "small original does not request a preview");
-                fixture.oversizedImage = true;
-                check(Arrays.equals(client.download(photo), new byte[] {7, 8, 9}) && fixture.previewGets.get() == previews + 1, "oversized original falls back to a bounded preview");
-                check(fixture.previewUrl.encodedPath().equals("/nextcloud/index.php/core/preview")
-                        && fixture.previewUrl.queryParameter("fileId").equals("42")
-                        && fixture.previewUrl.queryParameter("x").equals("1920") && fixture.previewUrl.queryParameter("y").equals("1920")
-                        && fixture.previewUrl.queryParameter("a").equals("1") && fixture.previewUrl.queryParameter("mode").equals("cover")
-                        && fixture.previewUrl.queryParameter("forceIcon").equals("0") && fixture.previewUrl.queryParameter("mimeFallback").equals("0"), "preview preserves installation prefix, aspect ratio and file ID without icon fallback");
-                fixture.previewStatus = 404;
-                try { client.download(photo); throw new AssertionError("missing preview must fail"); }
-                catch (IOException error) { check(error.getMessage().contains("Enable image previews"), "disabled previews have an actionable error"); }
-                fixture.previewStatus = 302;
-                expectFailure(() -> client.download(photo), "preview redirects are refused");
-                check(fixture.redirectHits.get() == 0, "preview authentication never follows redirects");
-                fixture.previewStatus = 200;
-                fixture.oversizedPreview = true;
-                try { client.download(photo); throw new AssertionError("oversized preview must fail"); }
-                catch (IOException error) { check(error.getMessage().equals(DavClient.PREVIEW_SIZE_ERROR), "preview keeps the 8 MiB cap and identifies its own limit"); }
-                fixture.oversizedPreview = false;
-                fixture.invalidPreviewType = true;
-                expectFailure(() -> client.download(photo), "preview HTML or icons cannot enter the image decoder");
-                fixture.invalidPreviewType = false;
-                previews = fixture.previewGets.get();
-                for (String id : Arrays.asList("", "../42", "https://evil.example", "42&fileId=43"))
-                    expectFailure(() -> client.download(new DavClient.Photo(photo.url, "", id)), "invalid file ID cannot select a preview");
-                expectFailure(() -> client.download(new DavClient.Photo(HttpUrl.get(fixture.url() + "/unselected/x.jpg"), "", "42")), "out-of-scope photo cannot trigger a preview");
-                check(fixture.previewGets.get() == previews, "invalid IDs and unselected sources never reach preview endpoint");
-                fixture.chunkedImage = true;
-                check(Arrays.equals(client.download(photo), new byte[] {7, 8, 9}), "unknown-length oversized original also uses a preview");
-                fixture.chunkedImage = false;
-                fixture.oversizedImage = false;
+            for (String source : Arrays.asList("Folders", "Albums")) {
+                values.put("photoSource", source);
+                Config config = new Config(values);
+                try (DavClient client = new DavClient(config)) {
+                    DavClient.Photo photo = client.list().get(0);
+                    int previews = fixture.previewGets.get();
+                    check(client.download(photo).length == 3 && fixture.previewGets.get() == previews, "small original does not request a preview: " + source);
+                    fixture.oversizedImage = true;
+                    check(Arrays.equals(client.download(photo), new byte[] {7, 8, 9}) && fixture.previewGets.get() == previews + 1, "oversized original falls back to a bounded preview: " + source);
+                    check(fixture.previewUrl.encodedPath().equals("/nextcloud/index.php/core/preview")
+                            && fixture.previewUrl.queryParameter("fileId").equals("42")
+                            && fixture.previewUrl.queryParameter("x").equals("1920") && fixture.previewUrl.queryParameter("y").equals("1920")
+                            && fixture.previewUrl.queryParameter("a").equals("1") && fixture.previewUrl.queryParameter("mode").equals("cover")
+                            && fixture.previewUrl.queryParameter("forceIcon").equals("0") && fixture.previewUrl.queryParameter("mimeFallback").equals("0"), "preview preserves installation prefix, aspect ratio and file ID without icon fallback");
+                    fixture.previewStatus = 404;
+                    try { client.download(photo); throw new AssertionError("missing preview must fail"); }
+                    catch (IOException error) { check(error.getMessage().contains("Enable image previews"), "disabled previews have an actionable error"); }
+                    fixture.previewStatus = 302;
+                    expectFailure(() -> client.download(photo), "preview redirects are refused");
+                    check(fixture.redirectHits.get() == 0, "preview authentication never follows redirects");
+                    fixture.previewStatus = 200;
+                    fixture.oversizedPreview = true;
+                    try { client.download(photo); throw new AssertionError("oversized preview must fail"); }
+                    catch (IOException error) { check(error.getMessage().equals(DavClient.PREVIEW_SIZE_ERROR), "preview keeps the 8 MiB cap and identifies its own limit"); }
+                    fixture.oversizedPreview = false;
+                    fixture.invalidPreviewType = true;
+                    expectFailure(() -> client.download(photo), "preview HTML or icons cannot enter the image decoder");
+                    fixture.invalidPreviewType = false;
+                    previews = fixture.previewGets.get();
+                    for (String id : Arrays.asList("", "../42", "https://evil.example", "42&fileId=43"))
+                        expectFailure(() -> client.download(new DavClient.Photo(photo.url, "", id)), "invalid file ID cannot select a preview");
+                    expectFailure(() -> client.download(new DavClient.Photo(HttpUrl.get(fixture.url() + "/unselected/x.jpg"), "", "42")), "out-of-scope photo cannot trigger a preview");
+                    check(fixture.previewGets.get() == previews, "invalid IDs and unselected sources never reach preview endpoint");
+                    fixture.chunkedImage = true;
+                    check(Arrays.equals(client.download(photo), new byte[] {7, 8, 9}), "unknown-length oversized original also uses a preview");
+                    fixture.chunkedImage = false;
+                    fixture.oversizedImage = false;
+                }
             }
             fixture.oversizedImage = true;
             Host host = new Host();
@@ -159,7 +279,7 @@ public final class NextcloudTest {
                 Thread.sleep(1100);
                 check(fixture.previewGets.get() == previews, "preview fallback makes no idle requests");
                 show(plugin);
-                await(() -> host.images.get() > 0, "first oversized folder photo loads through its preview");
+                await(() -> host.images.get() > 0, "first oversized album photo loads through its preview");
             } finally { plugin.stop(); }
             check(fixture.badAuth.get() == 0 && fixture.badAgent.get() == 0, "preview requests use app password and versioned User-Agent");
         }
@@ -522,6 +642,8 @@ public final class NextcloudTest {
         final HttpServer server;
         final AtomicInteger gets = new AtomicInteger(), badAuth = new AtomicInteger(), badDepth = new AtomicInteger(), redirectHits = new AtomicInteger();
         final AtomicInteger propfinds = new AtomicInteger();
+        final List<String> listedPaths = Collections.synchronizedList(new ArrayList<>());
+        final Set<String> missingPaths = Collections.synchronizedSet(new HashSet<>());
         final AtomicInteger badAgent = new AtomicInteger();
         volatile java.util.function.Function<String, String> directoryListing;
         volatile int mode;
@@ -565,9 +687,11 @@ public final class NextcloudTest {
                     send(exchange, previewStatus, new byte[] {7, 8, 9});
                     return;
                 }
+                if (missingPaths.contains(path)) { send(exchange, 404, new byte[0]); return; }
                 if (exchange.getRequestMethod().equals("PROPFIND")) {
                     if (oversizedListing) { exchange.sendResponseHeaders(207, DavClient.MAX_XML + 1); return; }
                     propfinds.incrementAndGet();
+                    listedPaths.add(path);
                     if (!"1".equals(exchange.getRequestHeaders().getFirst("Depth"))) badDepth.incrementAndGet();
                     String xml = directoryListing != null ? directoryListing.apply(path) : path.equals(root) ? listing(entry(root, true, "", "") + entry(root + "a.jpg", false, "image/jpeg", "a1")
                             + entry(root + "b.png", false, "image/png", "b1") + entry(root + "c.webp", false, "image/webp", "c1")

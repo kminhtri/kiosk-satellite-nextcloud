@@ -6,7 +6,7 @@
   "apiVersion": 1,
   "minAndroidSdk": 24,
   "entryClass": "io.github.kiosknextcloud.NextcloudPlugin",
-  "description": "Photo screensaver from Nextcloud WebDAV folders, with shuffle and a bounded in-memory offline cache.",
+  "description": "Photo screensaver from Nextcloud Files folders and personal Photos albums, with shuffle and a bounded in-memory offline cache.",
   "author": "kminhtri",
   "license": "Apache-2.0",
   "capabilities": [
@@ -39,12 +39,22 @@
       "description": "Create an app password in Nextcloud personal Security settings."
     },
     {
+      "key": "photoSource",
+      "type": "select",
+      "title": "Photo source",
+      "default": "Folders",
+      "group": "Connection",
+      "description": "Read Files folders, personal albums from the Nextcloud Photos app, or combine both in one slideshow.",
+      "options": ["Folders", "Albums", "Folders and albums"]
+    },
+    {
       "key": "folder",
       "type": "string",
       "title": "Photo folder",
       "default": "Photos",
       "group": "Connection",
-      "description": "Folder relative to your Nextcloud Files home. This is a folder, not a virtual Photos album."
+      "description": "Folder relative to your Nextcloud Files home. For a Photos album, change Photo source instead.",
+      "visibleWhen": { "key": "photoSource", "notEquals": "Albums" }
     },
     {
       "key": "additionalFolders",
@@ -56,6 +66,7 @@
       "maxItems": 31,
       "row": { "title": "path" },
       "default": [],
+      "visibleWhen": { "key": "photoSource", "notEquals": "Albums" },
       "fields": [
         {
           "key": "path",
@@ -72,7 +83,30 @@
       "title": "Include subfolders",
       "default": false,
       "group": "Connection",
-      "description": "Applies to all selected folders. Up to 20 levels, 100 folders and 5000 unique photos in total, with loop detection."
+      "description": "Applies only to Files folders; albums are never traversed recursively. Up to 20 levels, 100 collections and 5000 unique photos per refresh, with loop detection.",
+      "visibleWhen": { "key": "photoSource", "notEquals": "Albums" }
+    },
+    {
+      "key": "albums",
+      "type": "list",
+      "title": "Nextcloud Photos albums",
+      "group": "Connection",
+      "description": "Enter the exact names of personal albums belonging to this account. No public links or shared albums. Select up to 32 folders and albums in total.",
+      "addTitle": "Add album",
+      "minItems": 1,
+      "maxItems": 32,
+      "row": { "title": "name" },
+      "default": [],
+      "visibleWhen": { "key": "photoSource", "notEquals": "Folders" },
+      "fields": [
+        {
+          "key": "name",
+          "type": "string",
+          "title": "Album name",
+          "description": "Exact album name, for example Holidays 2026. Do not paste a URL or folder path.",
+          "required": true
+        }
+      ]
     },
     {
       "key": "secondsPerPhoto",
@@ -109,10 +143,10 @@
     {
       "key": "refreshMinutes",
       "type": "number",
-      "title": "Refresh folder every",
+      "title": "Refresh sources every",
       "default": 15,
       "group": "Slideshow",
-      "description": "Minutes between directory refreshes.",
+      "description": "Minutes between folder and album membership refreshes.",
       "min": 1,
       "max": 1440,
       "step": 1,

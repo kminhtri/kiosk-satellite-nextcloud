@@ -7,7 +7,7 @@ import okhttp3.Credentials;
 
 final class Config {
     final HttpUrl folder, preview;
-    final List<HttpUrl> folders;
+    final List<HttpUrl> folders, albums;
     final String authorization;
     final boolean recursive, shuffle, fill;
     final int seconds, refreshMinutes, cachePhotos;
@@ -28,24 +28,50 @@ final class Config {
         // Keep an installation subpath, removing only its trailing empty segment.
         if (base.pathSegments().get(base.pathSize() - 1).isEmpty()) url.removePathSegment(base.pathSize() - 1);
         preview = url.build().newBuilder().addPathSegment("index.php").addPathSegment("core").addPathSegment("preview").build();
-        url.addPathSegment("remote.php").addPathSegment("dav").addPathSegment("files").addPathSegment(username);
+        url.addPathSegment("remote.php").addPathSegment("dav");
+        HttpUrl dav = url.build();
+        String source = text(values, "photoSource", "Folders");
+        boolean useFolders = source.equals("Folders") || source.equals("Folders and albums");
+        boolean useAlbums = source.equals("Albums") || source.equals("Folders and albums");
+        if (!useFolders && !useAlbums)
+            throw new IllegalArgumentException("Choose Folders, Albums or Folders and albums as the photo source.");
         LinkedHashSet<HttpUrl> selected = new LinkedHashSet<>();
-        folder = folderUrl(url, text(values, "folder", "Photos"));
-        selected.add(folder);
-        Object additional = values.get("additionalFolders");
-        if (additional != null) {
-            if (!(additional instanceof List) || ((List<?>) additional).size() > 31)
-                throw new IllegalArgumentException("Select at most 31 additional photo folders.");
-            for (Object row : (List<?>) additional) {
-                Object path = row instanceof Map ? ((Map<?, ?>) row).get("path") : null;
-                if (!(path instanceof String) || ((String) path).trim().isEmpty())
-                    throw new IllegalArgumentException("Enter a path for each additional photo folder.");
-                selected.add(folderUrl(url, ((String) path).trim()));
+        if (useFolders) {
+            HttpUrl.Builder home = dav.newBuilder().addPathSegment("files").addPathSegment(username);
+            selected.add(folderUrl(home, text(values, "folder", "Photos")));
+            Object additional = values.get("additionalFolders");
+            if (additional != null) {
+                if (!(additional instanceof List) || ((List<?>) additional).size() > 31)
+                    throw new IllegalArgumentException("Select at most 31 additional photo folders.");
+                for (Object row : (List<?>) additional) {
+                    Object path = row instanceof Map ? ((Map<?, ?>) row).get("path") : null;
+                    if (!(path instanceof String) || ((String) path).trim().isEmpty())
+                        throw new IllegalArgumentException("Enter a path for each additional photo folder.");
+                    selected.add(folderUrl(home, ((String) path).trim()));
+                }
             }
         }
         folders = Collections.unmodifiableList(new ArrayList<>(selected));
+        folder = folders.isEmpty() ? null : folders.get(0);
+        selected.clear();
+        if (useAlbums) {
+            Object rows = values.get("albums");
+            if (!(rows instanceof List) || ((List<?>) rows).isEmpty() || ((List<?>) rows).size() > 32)
+                throw new IllegalArgumentException("Add between 1 and 32 album names in Plugin Manager.");
+            HttpUrl home = dav.newBuilder().addPathSegment("photos").addPathSegment(username).addPathSegment("albums").build();
+            for (Object row : (List<?>) rows) {
+                Object value = row instanceof Map ? ((Map<?, ?>) row).get("name") : null;
+                String name = value instanceof String ? ((String) value).trim() : "";
+                if (name.isEmpty() || name.equals(".") || name.equals("..") || name.contains("/") || name.contains("\\"))
+                    throw new IllegalArgumentException("Enter each album's exact name, without slashes. Do not paste a URL or folder path.");
+                selected.add(home.newBuilder().addPathSegment(name).addPathSegment("").build());
+            }
+        }
+        albums = Collections.unmodifiableList(new ArrayList<>(selected));
+        if (folders.size() + albums.size() > 32)
+            throw new IllegalArgumentException("Select at most 32 folders and albums in total.");
         authorization = Credentials.basic(username, password, java.nio.charset.StandardCharsets.UTF_8);
-        recursive = Boolean.TRUE.equals(values.get("includeSubfolders"));
+        recursive = useFolders && Boolean.TRUE.equals(values.get("includeSubfolders"));
         shuffle = !Boolean.FALSE.equals(values.get("shuffle"));
         fill = "Fill".equals(values.get("fit"));
         seconds = number(values, "secondsPerPhoto", 30, 5, 600);

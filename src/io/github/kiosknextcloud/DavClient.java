@@ -10,10 +10,10 @@ import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 import okhttp3.*;
 
-/** DAV requests stay within selected folders; oversized photos use same-server previews by file ID. */
+/** DAV requests stay in selected sources; oversized photos use same-server previews by file ID. */
 final class DavClient implements AutoCloseable {
     static final int MAX_XML = 4 * 1024 * 1024, MAX_IMAGE = 8 * 1024 * 1024;
-    static final String LIST_SIZE_ERROR = "Nextcloud folder listing exceeded the 4 MiB size limit. Select a smaller source.";
+    static final String LIST_SIZE_ERROR = "Nextcloud folder or album listing exceeded the 4 MiB size limit. Select a smaller source.";
     static final String PHOTO_SIZE_ERROR = "Nextcloud photo exceeded the 8 MiB download size limit. Use a smaller JPEG, PNG or WebP copy.";
     static final String PREVIEW_SIZE_ERROR = "Nextcloud photo preview exceeded the 8 MiB download size limit. Use a smaller JPEG, PNG or WebP copy.";
     static final int MAX_FOLDERS = 100, MAX_DEPTH = 20, MAX_PHOTOS = 5000;
@@ -36,7 +36,9 @@ final class DavClient implements AutoCloseable {
         final HttpUrl url;
         final String id;
         final int depth;
-        Folder(HttpUrl url, String id, int depth) { this.url = url; this.id = id; this.depth = depth; }
+        final boolean album;
+        Folder(HttpUrl url, String id, int depth) { this(url, id, depth, false); }
+        Folder(HttpUrl url, String id, int depth, boolean album) { this.url = url; this.id = id; this.depth = depth; this.album = album; }
     }
 
     static final class Listing {
@@ -64,34 +66,41 @@ final class DavClient implements AutoCloseable {
         for (HttpUrl root : config.folders) {
             if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0));
         }
+        for (HttpUrl root : config.albums) {
+            if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0, true));
+        }
         while (!pending.isEmpty()) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
             Folder current = pending.remove();
-            if (!current.id.isEmpty() && visitedIds.contains(current.id)) continue;
+            if (!current.album && !current.id.isEmpty() && visitedIds.contains(current.id)) continue;
             HttpUrl directory = current.url;
             Request request = request(directory).header("Depth", "1")
                     .method("PROPFIND", RequestBody.create(MediaType.parse("application/xml; charset=utf-8"), PROPERTIES)).build();
             Listing listing;
             Call call = newCall(request);
             try (Response response = call.execute()) {
+                if (current.album && response.code() == 404)
+                    throw new IOException("Nextcloud album was not found. Check its exact name and that the Photos app is enabled.");
                 require(response, 207);
                 listing = parse(read(response.body(), MAX_XML, LIST_SIZE_ERROR), directory, directory);
             } finally { finished(call); }
             String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
-            if (!id.isEmpty() && !visitedIds.add(id)) continue;
+            // Album collection IDs are not filesystem folder IDs. Albums have
+            // no subalbums; only their direct photo entries are consumed.
+            if (!current.album && !id.isEmpty() && !visitedIds.add(id)) continue;
             for (Photo photo : listing.photos) {
                 if (!photoUrls.add(pathKey(photo.url))) continue;
                 if (!photo.id.isEmpty() && !photoIds.add(photo.id)) continue;
                 result.add(photo);
-                if (result.size() > MAX_PHOTOS) throw new IOException("Photo limit reached (5000); choose fewer folders.");
+                if (result.size() > MAX_PHOTOS) throw new IOException("Photo limit reached (5000); choose fewer folders or albums.");
             }
-            if (config.recursive) for (Folder child : listing.folders) {
+            if (config.recursive && !current.album) for (Folder child : listing.folders) {
                 if (scheduledUrls.contains(pathKey(child.url))) continue;
                 if (!child.id.isEmpty() && (visitedIds.contains(child.id) || scheduledIds.contains(child.id))) continue;
                 if (current.depth >= MAX_DEPTH)
                     throw new IOException("Subfolder depth limit reached (20); select the deeper folder directly or disable subfolders.");
                 if (scheduledUrls.size() >= MAX_FOLDERS)
-                    throw new IOException("Folder limit reached (100); choose fewer folders or disable subfolders.");
+                    throw new IOException("Folder limit reached (100); choose fewer folders or albums, or disable subfolders.");
                 scheduledUrls.add(pathKey(child.url));
                 if (!child.id.isEmpty()) scheduledIds.add(child.id);
                 pending.add(new Folder(child.url, child.id, current.depth + 1));
@@ -103,7 +112,10 @@ final class DavClient implements AutoCloseable {
     byte[] download(Photo photo) throws IOException {
         boolean allowed = false;
         for (HttpUrl root : config.folders) allowed |= within(photo.url, root);
-        if (!allowed) throw new IOException("Photo address is outside the configured folders.");
+        // Use the album's DAV href directly, never an original-path or remote
+        // downloadURL property that could escape the selected collection.
+        for (HttpUrl root : config.albums) allowed |= within(photo.url, root) && directChild(photo.url, root);
+        if (!allowed) throw new IOException("Photo address is outside the configured folders and albums.");
         try {
             return download(photo.url, PHOTO_SIZE_ERROR, false);
         } catch (ResponseSizeException error) {
@@ -160,8 +172,8 @@ final class DavClient implements AutoCloseable {
     private static void require(Response response, int expected) throws IOException {
         int code = response.code();
         if (code == expected) return;
-        if (code == 401 || code == 403) throw new IOException("Nextcloud rejected access. Check the app password and folder permissions.");
-        if (code == 404) throw new IOException("Nextcloud folder or photo was not found.");
+        if (code == 401 || code == 403) throw new IOException("Nextcloud rejected access. Check the app password and folder or album permissions.");
+        if (code == 404) throw new IOException("Nextcloud folder, album or photo was not found.");
         if (code >= 300 && code < 400) throw new IOException("Nextcloud redirected the request. Enter its final server URL.");
         throw new IOException("Nextcloud returned HTTP " + code + ".");
     }
