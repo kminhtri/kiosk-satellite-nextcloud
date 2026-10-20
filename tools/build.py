@@ -11,7 +11,7 @@ import tempfile
 import zipfile
 
 from android_sdk import android_platform, android_build_tools, DEFAULT_PLATFORM
-from plugin_manifest import build_manifest
+from plugin_manifest import build_manifest, write_build_info
 from plugin_assets import asset_files, MAX_PACKAGE_BYTES
 from dependencies import dependencies
 from isolate import isolate
@@ -55,7 +55,8 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-') as temp:
     subprocess.run([java_tool('javac'), '--release', '8', '-cp', str(platform), '-d', str(sdk_classes), *map(str, sorted((ROOT / 'sdk/src').rglob('*.java')))], check=True)
     sdk_jar = out / 'kiosk-plugin-sdk-1.jar'
     subprocess.run([java_tool('jar'), 'cf', str(sdk_jar), '-C', str(sdk_classes), '.'], check=True)
-    subprocess.run([java_tool('javac'), '--release', '8', '-cp', os.pathsep.join(map(str, [sdk_jar, platform, *libraries])), '-d', str(classes), *map(str, sorted((plugin / 'src').rglob('*.java')))], check=True)
+    build_info = write_build_info(temp / 'generated', manifest_bytes)
+    subprocess.run([java_tool('javac'), '--release', '8', '-cp', os.pathsep.join(map(str, [sdk_jar, platform, *libraries])), '-d', str(classes), str(build_info), *map(str, sorted((plugin / 'src').rglob('*.java')))], check=True)
     isolated = temp / 'isolated.jar'
     isolate(ROOT, java_tool('java'), sdk_root, platform, sdk_jar, classes, libraries, isolated)
     subprocess.run([str(d8), '--min-api', str(manifest['minAndroidSdk']), '--lib', str(platform), '--classpath', str(sdk_jar), '--output', str(dex), str(isolated)], check=True)

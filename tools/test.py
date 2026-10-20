@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from android_sdk import android_platform, android_build_tools, DEFAULT_PLATFORM
 from dependencies import dependencies
 from isolate import isolate
+from plugin_manifest import build_manifest, write_build_info
 
 root = Path(__file__).resolve().parents[1]
 java_home = os.environ.get('JAVA_HOME')
@@ -35,7 +36,8 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-test-') as directory:
                     *map(str, sorted((root / 'sdk/src').rglob('*.java')))], check=True)
     sdk = temp / 'sdk.jar'
     subprocess.run([tool('jar'), 'cf', str(sdk), '-C', str(sdk_classes), '.'], check=True)
-    subprocess.run([tool('javac'), '--release', '8', '-cp', os.pathsep.join([str(sdk), classpath]), '-d', str(classes), *map(str, sources)], check=True)
+    build_info = write_build_info(temp / 'generated', build_manifest(root / 'kiosk-satellite-plugin.json'))
+    subprocess.run([tool('javac'), '--release', '8', '-cp', os.pathsep.join([str(sdk), classpath]), '-d', str(classes), str(build_info), *map(str, sources)], check=True)
     subprocess.run([tool('javac'), '--release', '8', '-d', str(host), *map(str, sorted((root / 'tests/host-runtime').rglob('*.java')))], check=True)
     # Reproduce the user's missing-method error before asserting the fix.
     broken = subprocess.run([tool('java'), '-cp', os.pathsep.join([str(host), str(classes), str(sdk), classpath]),

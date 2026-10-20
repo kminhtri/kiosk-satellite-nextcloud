@@ -127,7 +127,7 @@ final class DavClient implements AutoCloseable {
 
     private Request.Builder request(HttpUrl url) {
         return new Request.Builder().url(url).header("Authorization", config.authorization)
-                .header("User-Agent", "KioskSatellite-NextcloudPhotos/0.1.0");
+                .header("User-Agent", "KioskSatellite-NextcloudPhotoFrame/" + BuildInfo.VERSION);
     }
 
     private static void require(Response response, int expected) throws IOException {

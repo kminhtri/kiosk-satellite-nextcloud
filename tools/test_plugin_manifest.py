@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from plugin_manifest import build_manifest
+from plugin_manifest import build_manifest, write_build_info
 
 
 class BuildManifestTest(unittest.TestCase):
@@ -18,6 +18,9 @@ class BuildManifestTest(unittest.TestCase):
             self.assertEqual(release, {**json.loads(original), 'version': '1.2.0'})
             self.assertEqual(path.read_bytes(), original)
             self.assertEqual(json.loads(build_manifest(path, '1.3.0-beta.1'))['version'], '1.3.0-beta.1')
+            generated = write_build_info(directory, build_manifest(path, '1.3.0-beta.1'))
+            self.assertIn('VERSION = "1.3.0-beta.1";', generated.read_text())
+            self.assertEqual(path.read_bytes(), original)
 
     def test_invalid_versions_cannot_become_package_paths(self):
         with tempfile.TemporaryDirectory() as directory:

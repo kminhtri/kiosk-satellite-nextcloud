@@ -10,6 +10,7 @@ import me.jxl.kiosk.plugins.PluginHost;
 /** SDK callbacks never wait for network or image decoding. Each configuration owns a cancelable worker. */
 public final class NextcloudPlugin implements KioskPlugin {
     static final String VIEW = "plugin:nextcloud-photos:photos";
+    private static final String TITLE = "Nextcloud Photo Frame";
     private static final String MEMORY_WARNING = "Not enough memory for this photo. Cache cleared; retrying in 30 seconds.";
     private final Object lock = new Object();
     private final ImageEncoder encoder;
@@ -57,11 +58,11 @@ public final class NextcloudPlugin implements KioskPlugin {
             try {
                 Config config = new Config(settings);
                 session = new Session(config);
-                host.publishScreensaver("photos", "Nextcloud Photos", Renderer.message("Waiting for Nextcloud Photos to start…"));
+                host.publishScreensaver("photos", TITLE, Renderer.message("Waiting for Nextcloud Photo Frame to start…"));
                 host.status("Ready. Photos load when this screensaver is visible.", false);
                 session.start();
             } catch (IllegalArgumentException error) {
-                host.publishScreensaver("photos", "Nextcloud Photos", Renderer.message(error.getMessage()));
+                host.publishScreensaver("photos", TITLE, Renderer.message(error.getMessage()));
                 host.status(error.getMessage(), true);
             }
         }
@@ -72,7 +73,7 @@ public final class NextcloudPlugin implements KioskPlugin {
             if (session == null) return;
             if (command.equals("refresh")) session.refresh = true;
             else if (command.equals("next")) session.advance = true;
-            else throw new IllegalArgumentException("Unknown Nextcloud Photos action");
+            else throw new IllegalArgumentException("Unknown Nextcloud Photo Frame action");
         }
     }
 
@@ -122,7 +123,7 @@ public final class NextcloudPlugin implements KioskPlugin {
             dav = new DavClient(config);
             dav.setActive(false);
             worker = Executors.newSingleThreadScheduledExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "NextcloudPhotos");
+                Thread thread = new Thread(runnable, "NextcloudPhotoFrame");
                 thread.setDaemon(true);
                 return thread;
             });
@@ -267,7 +268,7 @@ public final class NextcloudPlugin implements KioskPlugin {
         private void publish(String html) {
             synchronized (lock) {
                 if (alive && session == this && !closed) {
-                    try { host.publishScreensaver("photos", "Nextcloud Photos", html); }
+                    try { host.publishScreensaver("photos", TITLE, html); }
                     catch (IllegalStateException ignored) { /* host may revoke before calling stop */ }
                 }
             }

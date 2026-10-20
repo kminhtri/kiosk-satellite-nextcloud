@@ -14,10 +14,15 @@ validate_manifest(manifest)
 package = root / 'dist' / f"{manifest['id']}-{manifest['version']}.zip"
 validate_package(package.read_bytes(), manifest)
 classes = 0
+agent = ('KioskSatellite-NextcloudPhotoFrame/' + manifest['version']).encode('ascii') + b'\0'
+agent_found = False
 with zipfile.ZipFile(package) as archive:
     with zipfile.ZipFile(io.BytesIO(archive.read('plugin.jar'))) as jar:
         for name in jar.namelist():
-            classes += verify_namespace(jar.read(name))
+            dex = jar.read(name)
+            classes += verify_namespace(dex)
+            agent_found |= agent in dex
+assert agent_found, 'The DEX User-Agent does not match the effective package version'
 digest = hashlib.sha256(package.read_bytes()).hexdigest()
 assert package.with_suffix('.zip.sha256').read_text() == f'{digest}  {package.name}\n'
 print(f'Installer validation passed: {package.name} ({package.stat().st_size:,} bytes)')

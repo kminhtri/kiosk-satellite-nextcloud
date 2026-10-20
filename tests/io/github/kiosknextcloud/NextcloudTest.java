@@ -239,6 +239,7 @@ public final class NextcloudTest {
         } catch (IOException expected) { check(expected.getMessage().contains("size limit"), "unknown-length image also stops at 8 MiB"); }
         check(streamed.get() <= 8 * 1024 * 1024 + 8192, "unknown-length response stops reading promptly at the cap");
         check(fixture.badAuth.get() == 0 && fixture.badDepth.get() == 0, "all requests carry correct authentication and depth");
+        check(fixture.badAgent.get() == 0, "User-Agent matches the package version");
     }
 
     static void slideshow(Fixture fixture) throws Exception {
@@ -459,6 +460,7 @@ public final class NextcloudTest {
         final HttpServer server;
         final AtomicInteger gets = new AtomicInteger(), badAuth = new AtomicInteger(), badDepth = new AtomicInteger(), redirectHits = new AtomicInteger();
         final AtomicInteger propfinds = new AtomicInteger();
+        final AtomicInteger badAgent = new AtomicInteger();
         volatile java.util.function.Function<String, String> directoryListing;
         volatile int mode;
         volatile boolean failImages;
@@ -476,6 +478,7 @@ public final class NextcloudTest {
             try {
                 if (exchange.getRequestURI().getPath().equals("/redirect-target")) { redirectHits.incrementAndGet(); send(exchange, 200, new byte[0]); return; }
                 if (!Credentials.basic("alice", "test-password").equals(exchange.getRequestHeaders().getFirst("Authorization"))) badAuth.incrementAndGet();
+                if (!("KioskSatellite-NextcloudPhotoFrame/" + BuildInfo.VERSION).equals(exchange.getRequestHeaders().getFirst("User-Agent"))) badAgent.incrementAndGet();
                 CountDownLatch gate = block;
                 if (gate != null) {
                     entered.countDown();
