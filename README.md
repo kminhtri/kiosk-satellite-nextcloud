@@ -51,7 +51,7 @@ If the mode is missing in Remote Admin after enabling the plugin, reload the who
 - **Refresh photos** and **Next photo** plugin actions, assignable through Kiosk Satellite gestures, drawer shortcuts or Home Assistant buttons.
 - Kiosk Satellite retains its standard idle timeout, brightness, wake triggers, touch dismissal, widgets and schedules. Stock slideshow edge-tap navigation and transitions do not control this plugin.
 
-Images are resized to at most 1920 pixels on their longest side and compressed to at most 350 KiB. Original downloads are limited to 24 MiB per photo. HEIC, GIF, RAW, videos, public-share authentication and virtual albums are outside this release's scope. Export those photos to JPEG/PNG/WebP in the selected folder.
+Images are resized to at most 1920 pixels on their longest side and compressed to at most 350 KiB. Original downloads are limited to 8 MiB per photo, including responses without Content-Length. A caught OutOfMemoryError clears the resized-photo cache and backs off for 30 seconds without terminating the scheduled slideshow; recovery is best effort in the host process. HEIC, GIF, RAW, videos, public-share authentication and virtual albums are outside this release's scope. Export those photos to JPEG/PNG/WebP in the selected folder.
 
 ## Privacy and connections
 

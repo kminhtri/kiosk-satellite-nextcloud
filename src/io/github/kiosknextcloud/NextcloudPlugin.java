@@ -9,6 +9,7 @@ import me.jxl.kiosk.plugins.PluginHost;
 
 /** SDK callbacks never wait for network or image decoding. Each configuration owns a cancelable worker. */
 public final class NextcloudPlugin implements KioskPlugin {
+    private static final String MEMORY_WARNING = "Not enough memory for this photo. Cache cleared; retrying in 30 seconds.";
     private final Object lock = new Object();
     private final ImageEncoder encoder;
     private final java.util.function.LongSupplier clock;
@@ -101,7 +102,7 @@ public final class NextcloudPlugin implements KioskPlugin {
         String current;
         volatile boolean refresh = true, advance, resetDwell;
         volatile boolean closed;
-        long refreshAt, nextAt, networkRetryAt;
+        long refreshAt, nextAt, networkRetryAt, processingRetryAt;
 
         Session(Config config) {
             this.config = config;
@@ -117,7 +118,7 @@ public final class NextcloudPlugin implements KioskPlugin {
         long now() { return clock.getAsLong(); }
 
         void tick() {
-            if (closed) return;
+            if (closed || now() < processingRetryAt) return;
             try {
                 long now = now();
                 if (refresh || now >= refreshAt) {
@@ -169,10 +170,21 @@ public final class NextcloudPlugin implements KioskPlugin {
                     ensureCycle();
                     cachedOrDownload(cycle.get(cursor));
                 }
+            } catch (OutOfMemoryError error) {
+                // Release the largest retained buffers before calling the host.
+                // Do not let a second OOM in status reporting kill the timer.
+                cache.clear();
+                processingRetryAt = now() + 30_000;
+                nextAt = processingRetryAt;
+                if (photos.isEmpty()) refresh = true;
+                try { if (!closed) report(MEMORY_WARNING, true); }
+                catch (OutOfMemoryError ignored) { /* the next scheduled tick may recover */ }
             } catch (RuntimeException error) {
                 // Do not expose raw exception strings, which may contain private URLs or credentials.
-                report("Photo processing failed. Try another photo or a smaller folder.", true);
-                nextAt = now() + 30_000;
+                processingRetryAt = now() + 30_000;
+                nextAt = processingRetryAt;
+                try { if (!closed) report("Photo processing failed. Try another photo or a smaller folder.", true); }
+                catch (OutOfMemoryError ignored) { cache.clear(); }
             }
         }
 

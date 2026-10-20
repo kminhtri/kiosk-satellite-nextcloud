@@ -26,6 +26,8 @@ public final class NextcloudTest {
             slideshow(fixture);
             lifecycle(fixture);
         }
+        memoryRecovery(false);
+        memoryRecovery(true);
         System.out.println("Nextcloud integration tests passed (" + checks + " assertions).");
     }
 
@@ -197,6 +199,12 @@ public final class NextcloudTest {
             List<DavClient.Photo> photos = client.list();
             check(photos.size() == 3, "depth-one directory contains three photos");
             check(Arrays.equals(client.download(photos.get(0)), new byte[] {1, 2, 3}), "authenticated GET body");
+            fixture.oversizedImage = true;
+            try {
+                client.download(photos.get(0));
+                throw new AssertionError("9 MiB image must exceed download cap");
+            } catch (IOException expected) { check(expected.getMessage().contains("size limit"), "reject 9 MiB Content-Length before buffering"); }
+            finally { fixture.oversizedImage = false; }
             fixture.mode = 401;
             expectFailure(client::list, "authentication failure");
             fixture.mode = 302;
@@ -212,6 +220,23 @@ public final class NextcloudTest {
         }
         byte[] big = new byte[33];
         expectFailure(() -> DavClient.read(ResponseBody.create(MediaType.parse("image/jpeg"), big), 32), "enforce response length limit");
+        AtomicInteger streamed = new AtomicInteger();
+        InputStream stream = new InputStream() {
+            private int remaining = 9 * 1024 * 1024;
+            @Override public int read() { if (remaining-- <= 0) return -1; streamed.incrementAndGet(); return 0; }
+            @Override public int read(byte[] bytes, int offset, int length) {
+                if (remaining <= 0) return -1;
+                int n = Math.min(remaining, length);
+                Arrays.fill(bytes, offset, offset + n, (byte) 0);
+                remaining -= n; streamed.addAndGet(n); return n;
+            }
+        };
+        ResponseBody chunked = ResponseBody.create(MediaType.parse("image/jpeg"), -1, okio.Okio.buffer(okio.Okio.source(stream)));
+        try {
+            DavClient.read(chunked, DavClient.MAX_IMAGE);
+            throw new AssertionError("9 MiB stream without Content-Length must exceed download cap");
+        } catch (IOException expected) { check(expected.getMessage().contains("size limit"), "unknown-length image also stops at 8 MiB"); }
+        check(streamed.get() <= 8 * 1024 * 1024 + 8192, "unknown-length response stops reading promptly at the cap");
         check(fixture.badAuth.get() == 0 && fixture.badDepth.get() == 0, "all requests carry correct authentication and depth");
     }
 
@@ -282,6 +307,41 @@ public final class NextcloudTest {
         check(ready.getAsBoolean(), description);
     }
 
+    static void show(NextcloudPlugin plugin) {
+        plugin.onEvent("ks.screensaver.state", Collections.singletonMap("active", true));
+        plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", "plugin:nextcloud-photos:photos"));
+    }
+
+    static void memoryRecovery(boolean processingFailure) throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            AtomicLong clock = new AtomicLong(1);
+            AtomicInteger encodes = new AtomicInteger();
+            Host host = new Host();
+            host.failMemoryStatus = !processingFailure;
+            host.failProcessingStatus = processingFailure;
+            NextcloudPlugin plugin = new NextcloudPlugin(original -> {
+                if (encodes.incrementAndGet() == 2) {
+                    if (processingFailure) throw new IllegalArgumentException("simulated decoder failure");
+                    throw new OutOfMemoryError("simulated decoder pressure");
+                }
+                return original;
+            }, clock::get);
+            Map<String, Object> values = settings(fixture.url());
+            values.put("shuffle", false);
+            plugin.start(host, values);
+            try {
+                show(plugin);
+                await(() -> host.memoryReports.get() == 1, "OOM recovery survives even a second OOM in status reporting");
+                int images = host.images.get();
+                clock.addAndGet(10_000);
+                Thread.sleep(1200);
+                check(encodes.get() == 2, "OOM backoff avoids repeated work on every scheduled tick");
+                clock.addAndGet(30_000);
+                await(() -> host.images.get() > images && host.status.contains("2 cached"), "scheduled slideshow recovers after OOM and rebuilds the cleared cache");
+            } finally { plugin.stop(); }
+        }
+    }
+
     static Map<String, Object> settings(String server) {
         Map<String, Object> map = new HashMap<>();
         map.put("serverUrl", server); map.put("username", "alice"); map.put("appPassword", "test-password");
@@ -304,6 +364,9 @@ public final class NextcloudTest {
 
     static final class Host implements PluginHost {
         final AtomicInteger images = new AtomicInteger(), publishes = new AtomicInteger();
+        final AtomicInteger memoryReports = new AtomicInteger();
+        volatile boolean failMemoryStatus;
+        volatile boolean failProcessingStatus;
         volatile String html = "", status = "";
         @Override public void subscribe(String event) {}
         @Override public void executeCommand(String command, Map<String, Object> args, CommandCallback callback) {
@@ -313,7 +376,17 @@ public final class NextcloudTest {
             html = value; publishes.incrementAndGet();
             if (value.contains("data:image/jpeg;base64,")) images.incrementAndGet();
         }
-        @Override public void status(String message, boolean error) { status = message; }
+        @Override public void status(String message, boolean error) {
+            if (message.startsWith("Photo processing failed") && failProcessingStatus) {
+                memoryReports.incrementAndGet(); failProcessingStatus = false;
+                throw new OutOfMemoryError("simulated status pressure after processing error");
+            }
+            if (message.startsWith("Not enough memory")) {
+                memoryReports.incrementAndGet();
+                if (failMemoryStatus) { failMemoryStatus = false; throw new OutOfMemoryError("simulated status pressure"); }
+            }
+            status = message;
+        }
         @Override public void showWindow(String title, String message, String button) { throw new AssertionError("no overlay required"); }
         @Override public void hideWindow() {}
         @Override public void log(String message) {}
@@ -326,6 +399,7 @@ public final class NextcloudTest {
         volatile java.util.function.Function<String, String> directoryListing;
         volatile int mode;
         volatile boolean failImages;
+        volatile boolean oversizedImage;
         volatile CountDownLatch block, entered;
         final String root = "/remote.php/dav/files/alice/Photos/";
         Fixture() throws IOException {
@@ -359,6 +433,7 @@ public final class NextcloudTest {
                     send(exchange, 207, xml.getBytes(StandardCharsets.UTF_8));
                 } else if (exchange.getRequestMethod().equals("GET")) {
                     gets.incrementAndGet();
+                    if (oversizedImage) { exchange.sendResponseHeaders(200, 9 * 1024 * 1024); return; }
                     send(exchange, failImages ? 503 : 200, new byte[] {(byte) (path.contains("a.jpg") ? 1 : path.contains("b.png") ? 2 : 3), 2, 3});
                 } else send(exchange, 405, new byte[0]);
             } finally { exchange.close(); }

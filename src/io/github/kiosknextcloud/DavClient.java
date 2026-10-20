@@ -12,7 +12,7 @@ import okhttp3.*;
 
 /** All requests stay within selected folders and never follow redirects with credentials. */
 final class DavClient implements AutoCloseable {
-    static final int MAX_XML = 4 * 1024 * 1024, MAX_IMAGE = 24 * 1024 * 1024;
+    static final int MAX_XML = 4 * 1024 * 1024, MAX_IMAGE = 8 * 1024 * 1024;
     static final int MAX_FOLDERS = 100, MAX_DEPTH = 20, MAX_PHOTOS = 5000;
     static final String PROPERTIES = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop>"
             + "<d:resourcetype/><d:getcontenttype/><d:getetag/><oc:fileid/></d:prop></d:propfind>";
