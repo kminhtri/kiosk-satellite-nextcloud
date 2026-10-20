@@ -35,7 +35,9 @@ You can also install it manually:
    - **Include subfolders** (optional): includes descendants of every selected folder. Leave it off to show only photos directly inside the selected folders.
 5. Open **Settings → Screensaver**, enable it, and select **Nextcloud Photos (Nextcloud Photos)** as the mode, or select it in a screensaver schedule.
 
-The plugin registers its mode immediately, including before connection settings are complete. Connection status appears on its settings page. An empty folder or initial connection failure also displays a message in the screensaver. After photos load, failures preserve the current photo.
+The plugin registers its mode immediately, including before connection settings are complete. Network work starts only when **Nextcloud Photos** is the visible screensaver and the screen is on. An empty folder or initial connection failure displays a message there; after photos load, failures preserve the current photo.
+
+The SDK does not replay the current `screensaver.view` on subscription and has no read command for that view. If you enable the plugin while a screensaver is already running, dismiss it and start it again once. The plugin waits for a view event instead of guessing which mode is visible.
 
 If the mode is missing in Remote Admin after enabling the plugin, reload the whole browser page and reopen the **Screensaver mode** dropdown. Set screensaver brightness above 0% to see photos.
 
@@ -46,7 +48,7 @@ If the mode is missing in Remote Admin after enabling the plugin, reload the who
 - Overlapping folder paths are visited once. Nextcloud `oc:fileid` values also prevent repeated directory aliases and duplicate photos when available. Without IDs, path checks and traversal limits still stop unbounded recursion. Separate copies with different IDs remain separate photos.
 - Shuffle without repeats within a cycle, or Nextcloud's listing order with shuffle disabled.
 - Configurable 5–600 second interval, Fit/Fill scaling and periodic folder refresh.
-- Prefetches the next photo. Rotation pauses while the screensaver is inactive or the screen is off; directory refresh still runs periodically. The first two photos can preload while idle.
+- Fetches the first photo and prefetches the next one only while this specific screensaver is visible and the screen is on. Hiding it, switching to another mode or turning off the screen cancels current HTTP work and suspends the worker timer, directory refreshes, downloads and retries. Refresh/next actions invoked while paused are deferred until it is visible again.
 - Bounded in-memory cache of 2–30 resized photos. During connection failures, available cached photos continue rotating. **The cache clears when settings change, the plugin stops, or the app restarts.** It is not a persistent offline photo library.
 - **Refresh photos** and **Next photo** plugin actions, assignable through Kiosk Satellite gestures, drawer shortcuts or Home Assistant buttons.
 - Kiosk Satellite retains its standard idle timeout, brightness, wake triggers, touch dismissal, widgets and schedules. Stock slideshow edge-tap navigation and transitions do not control this plugin.
@@ -77,7 +79,7 @@ Tools download pinned OkHttp, Okio, Kotlin standard library and annotations JARs
 
 The test runner first reproduces the `Intrinsics.checkNotNullParameter` failure with an incompatible host Kotlin fixture, then runs the isolated probe and full integration suite with that same host class first on the classpath. Package verification also checks the final DEX type references for dependency namespace leaks.
 
-Tests start a local HTTP WebDAV fixture and exercise authentication, multiple folders, overlapping selections, directory aliases and loops, traversal limits, URL/XML validation, redirects, bounded responses, rendering size limits, timing, cached offline rotation, screen-off behavior and cancellation of obsolete work. Image encoding is substituted in JVM tests; Android bitmap/EXIF decoding and the actual WebView require a device smoke test.
+Tests start a local HTTP WebDAV fixture and exercise authentication, multiple folders, overlapping selections, directory aliases and loops, traversal limits, URL/XML validation, redirects, bounded responses, rendering size limits, timing, cached offline rotation, zero idle traffic, mode-switch cancellation, the 8 MiB download limit, simulated out-of-memory recovery and cancellation of obsolete work. Image encoding is substituted in JVM tests; Android bitmap/EXIF decoding and the actual WebView require a device smoke test.
 
 To compare the bundled SDK with a Kiosk Satellite checkout:
 
@@ -91,7 +93,7 @@ python3 tools/check-sdk.py /path/to/kiosk-satellite
 2. Verify Fit/Fill, image orientation, widgets, idle activation and touch dismissal.
 3. Let several slides cache, disconnect networking, and verify that the current photo remains visible and cached slides rotate.
 4. Restore networking and run **Refresh photos**. Add/delete a photo and verify the next refresh updates the selection.
-5. Turn the screen off and wake it. Restart the plugin and reboot the kiosk; verify photos reload when Nextcloud is reachable.
+5. Switch to Clock or dismiss the screensaver and verify that Nextcloud requests stop, including retries after a connection failure. Turn the screen off and wake it, then activate this mode again. Restart the plugin and reboot the kiosk; verify photos reload when this screensaver becomes visible and Nextcloud is reachable.
 6. Add a second folder under **Additional photo folders** and verify both appear in the slideshow. Select an overlapping subfolder too, then enable **Include subfolders** and check that photos are not repeated within a cycle. Upgrade from 0.1.x and verify the original photo folder and credentials are retained.
 
 ## Publish

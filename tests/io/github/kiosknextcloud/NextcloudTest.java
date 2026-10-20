@@ -26,6 +26,7 @@ public final class NextcloudTest {
             slideshow(fixture);
             lifecycle(fixture);
         }
+        idleAndCancellation();
         memoryRecovery(false);
         memoryRecovery(true);
         System.out.println("Nextcloud integration tests passed (" + checks + " assertions).");
@@ -248,9 +249,11 @@ public final class NextcloudTest {
         values.put("shuffle", false); values.put("cachePhotos", 2); values.put("secondsPerPhoto", 5);
         plugin.start(host, values);
         try {
-            await(() -> host.images.get() >= 1, "first photo while screensaver idle");
+            show(plugin);
+            await(() -> host.images.get() >= 1, "first photo after this screensaver starts");
             await(() -> host.status.contains("2 cached"), "prefetch next image");
             int count = host.images.get(), requests = fixture.gets.get();
+            plugin.onEvent("ks.screensaver.state", Collections.singletonMap("active", false));
             clock.addAndGet(10_000);
             Thread.sleep(1200);
             check(host.images.get() == count && fixture.gets.get() == requests, "idle slideshow does not advance or keep fetching");
@@ -276,6 +279,7 @@ public final class NextcloudTest {
             fixture.failImages = false;
             clock.addAndGet(60_000);
             plugin.execute("refresh", Collections.emptyMap());
+            plugin.onEvent("ks.screen.state", Collections.singletonMap("on", true));
             await(() -> host.status.startsWith("3 photos available"), "manual refresh recovers connection");
         } finally { fixture.failImages = false; plugin.stop(); }
         int afterStop = host.publishes.get();
@@ -289,6 +293,7 @@ public final class NextcloudTest {
         Host host = new Host();
         NextcloudPlugin plugin = new NextcloudPlugin(original -> original, () -> 1L);
         plugin.start(host, settings(fixture.url()));
+        show(plugin);
         check(fixture.entered.await(5, TimeUnit.SECONDS), "request started asynchronously");
         long start = System.nanoTime();
         plugin.configure(Collections.emptyMap());
@@ -309,7 +314,65 @@ public final class NextcloudTest {
 
     static void show(NextcloudPlugin plugin) {
         plugin.onEvent("ks.screensaver.state", Collections.singletonMap("active", true));
-        plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", "plugin:nextcloud-photos:photos"));
+        plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", NextcloudPlugin.VIEW));
+    }
+
+    static void idleAndCancellation() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            AtomicLong clock = new AtomicLong(1);
+            Host host = new Host();
+            NextcloudPlugin plugin = new NextcloudPlugin(original -> original, clock::get);
+            plugin.start(host, settings(fixture.url()));
+            try {
+                plugin.execute("refresh", Collections.emptyMap());
+                plugin.execute("next", Collections.emptyMap());
+                clock.addAndGet(3_600_000);
+                Thread.sleep(1200);
+                check(fixture.propfinds.get() == 0 && fixture.gets.get() == 0, "no initial load, prefetch, manual work or retries while idle");
+                plugin.onEvent("ks.screensaver.state", Collections.singletonMap("active", true));
+                plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", "clock"));
+                Thread.sleep(1200);
+                check(fixture.propfinds.get() == 0 && fixture.gets.get() == 0, "another active screensaver does not start this plugin's work");
+                show(plugin);
+                await(() -> host.images.get() >= 1 && host.status.contains("2 cached"), "first load and prefetch after renderer becomes visible");
+                int listed = fixture.propfinds.get(), gets = fixture.gets.get(), images = host.images.get();
+                plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", "clock"));
+                plugin.execute("refresh", Collections.emptyMap());
+                plugin.execute("next", Collections.emptyMap());
+                clock.addAndGet(3_600_000);
+                Thread.sleep(1200);
+                check(fixture.propfinds.get() == listed && fixture.gets.get() == gets && host.images.get() == images, "mode switch pauses due refreshes and queued actions");
+                show(plugin);
+                await(() -> fixture.propfinds.get() > listed && host.images.get() > images, "queued refresh and next resume only when visible");
+                fixture.mode = 503;
+                plugin.execute("refresh", Collections.emptyMap());
+                await(() -> host.status.contains("HTTP 503"), "visible frame reports refresh error");
+                plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", "clock"));
+                int failedAt = fixture.propfinds.get();
+                clock.addAndGet(120_000);
+                Thread.sleep(1200);
+                check(fixture.propfinds.get() == failedAt, "30-second failure retry is suspended while another mode is visible");
+            } finally { plugin.stop(); }
+        }
+        try (Fixture fixture = new Fixture()) {
+            fixture.block = new CountDownLatch(1);
+            fixture.entered = new CountDownLatch(1);
+            Host host = new Host();
+            NextcloudPlugin plugin = new NextcloudPlugin(original -> original, () -> 1L);
+            plugin.start(host, settings(fixture.url()));
+            try {
+                show(plugin);
+                check(fixture.entered.await(5, TimeUnit.SECONDS), "visible request reaches blocking fixture");
+                long start = System.nanoTime();
+                plugin.onEvent("ks.screensaver.view", Collections.singletonMap("view", "clock"));
+                check(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 500, "hiding promptly cancels a blocked HTTP call");
+                fixture.block.countDown(); fixture.block = null;
+                Thread.sleep(1200);
+                check(host.images.get() == 0 && fixture.gets.get() == 0, "canceled listing cannot trigger image downloads while hidden");
+                show(plugin);
+                await(() -> host.images.get() > 0, "canceling a request does not close the client permanently");
+            } finally { if (fixture.block != null) fixture.block.countDown(); plugin.stop(); }
+        }
     }
 
     static void memoryRecovery(boolean processingFailure) throws Exception {

@@ -18,6 +18,9 @@ final class DavClient implements AutoCloseable {
             + "<d:resourcetype/><d:getcontenttype/><d:getetag/><oc:fileid/></d:prop></d:propfind>";
     final Config config;
     private final OkHttpClient http;
+    private final Object callLock = new Object();
+    private Call currentCall;
+    private boolean enabled = true, closed;
 
     static final class Photo {
         final HttpUrl url;
@@ -62,10 +65,11 @@ final class DavClient implements AutoCloseable {
             Request request = request(directory).header("Depth", "1")
                     .method("PROPFIND", RequestBody.create(MediaType.parse("application/xml; charset=utf-8"), PROPERTIES)).build();
             Listing listing;
-            try (Response response = http.newCall(request).execute()) {
+            Call call = newCall(request);
+            try (Response response = call.execute()) {
                 require(response, 207);
                 listing = parse(read(response.body(), MAX_XML), directory, directory);
-            }
+            } finally { finished(call); }
             String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
             if (!id.isEmpty() && !visitedIds.add(id)) continue;
             for (Photo photo : listing.photos) {
@@ -93,10 +97,32 @@ final class DavClient implements AutoCloseable {
         boolean allowed = false;
         for (HttpUrl root : config.folders) allowed |= within(photo.url, root);
         if (!allowed) throw new IOException("Photo address is outside the configured folders.");
-        try (Response response = http.newCall(request(photo.url).get().build()).execute()) {
+        Call call = newCall(request(photo.url).get().build());
+        try (Response response = call.execute()) {
             require(response, 200);
             return read(response.body(), MAX_IMAGE);
+        } finally { finished(call); }
+    }
+
+    void setActive(boolean active) {
+        synchronized (callLock) {
+            enabled = active && !closed;
+            if (!enabled && currentCall != null) currentCall.cancel();
         }
+    }
+
+    private Call newCall(Request request) throws IOException {
+        synchronized (callLock) {
+            if (!enabled || closed) throw new InterruptedIOException("Photo frame is inactive.");
+            // Register before execute(), so a pause cannot miss a call that has
+            // not reached OkHttp's dispatcher yet. This client has one worker.
+            currentCall = http.newCall(request);
+            return currentCall;
+        }
+    }
+
+    private void finished(Call call) {
+        synchronized (callLock) { if (currentCall == call) currentCall = null; }
     }
 
     private Request.Builder request(HttpUrl url) {
@@ -232,6 +258,7 @@ final class DavClient implements AutoCloseable {
     }
 
     @Override public void close() {
+        synchronized (callLock) { closed = true; setActive(false); }
         http.dispatcher().cancelAll();
         http.dispatcher().executorService().shutdownNow();
         http.connectionPool().evictAll();

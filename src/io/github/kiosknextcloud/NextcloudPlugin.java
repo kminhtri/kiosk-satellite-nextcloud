@@ -9,6 +9,7 @@ import me.jxl.kiosk.plugins.PluginHost;
 
 /** SDK callbacks never wait for network or image decoding. Each configuration owns a cancelable worker. */
 public final class NextcloudPlugin implements KioskPlugin {
+    static final String VIEW = "plugin:nextcloud-photos:photos";
     private static final String MEMORY_WARNING = "Not enough memory for this photo. Cache cleared; retrying in 30 seconds.";
     private final Object lock = new Object();
     private final ImageEncoder encoder;
@@ -17,15 +18,21 @@ public final class NextcloudPlugin implements KioskPlugin {
     private Session session;
     private boolean alive;
     private volatile boolean active, screenOn = true;
+    private volatile String view;
     private int saverRevision, screenRevision;
 
     public NextcloudPlugin() { this(new AndroidImageEncoder(), () -> System.nanoTime() / 1_000_000); }
     NextcloudPlugin(ImageEncoder encoder, java.util.function.LongSupplier clock) { this.encoder = encoder; this.clock = clock; }
 
     @Override public void start(PluginHost host, Map<String, Object> settings) {
-        synchronized (lock) { this.host = host; alive = true; }
+        synchronized (lock) {
+            this.host = host; alive = true;
+            active = false; screenOn = false; view = null;
+            saverRevision++; screenRevision++;
+        }
         host.subscribe("screensaver.state");
         host.subscribe("screen.state");
+        host.subscribe("screensaver.view");
         initialState("isScreensaverActive", false);
         initialState("isScreenOn", true);
         configure(settings);
@@ -38,6 +45,7 @@ public final class NextcloudPlugin implements KioskPlugin {
                 if (!alive || !ok || revision != (screen ? screenRevision : saverRevision)) return;
                 if (screen) screenOn = Boolean.TRUE.equals(data);
                 else active = Boolean.TRUE.equals(data);
+                if (session != null) session.updateActivity();
             }
         });
     }
@@ -49,8 +57,8 @@ public final class NextcloudPlugin implements KioskPlugin {
             try {
                 Config config = new Config(settings);
                 session = new Session(config);
-                host.publishScreensaver("photos", "Nextcloud Photos", Renderer.message("Loading Nextcloud photos…"));
-                host.status("Connecting to Nextcloud…", false);
+                host.publishScreensaver("photos", "Nextcloud Photos", Renderer.message("Waiting for Nextcloud Photos to start…"));
+                host.status("Ready. Photos load when this screensaver is visible.", false);
                 session.start();
             } catch (IllegalArgumentException error) {
                 host.publishScreensaver("photos", "Nextcloud Photos", Renderer.message(error.getMessage()));
@@ -73,11 +81,13 @@ public final class NextcloudPlugin implements KioskPlugin {
             if (event.equals("ks.screensaver.state")) {
                 saverRevision++;
                 active = Boolean.TRUE.equals(payload.get("active"));
-                if (active && session != null) session.resetDwell = true;
             } else if (event.equals("ks.screen.state")) {
                 screenRevision++;
                 screenOn = Boolean.TRUE.equals(payload.get("on"));
+            } else if (event.equals("ks.screensaver.view")) {
+                view = payload.get("view") instanceof String ? (String) payload.get("view") : null;
             }
+            if (session != null) session.updateActivity();
         }
     }
 
@@ -102,11 +112,15 @@ public final class NextcloudPlugin implements KioskPlugin {
         String current;
         volatile boolean refresh = true, advance, resetDwell;
         volatile boolean closed;
+        volatile boolean running;
+        volatile long activityRevision;
+        private ScheduledFuture<?> loop;
         long refreshAt, nextAt, networkRetryAt, processingRetryAt;
 
         Session(Config config) {
             this.config = config;
             dav = new DavClient(config);
+            dav.setActive(false);
             worker = Executors.newSingleThreadScheduledExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "NextcloudPhotos");
                 thread.setDaemon(true);
@@ -114,18 +128,41 @@ public final class NextcloudPlugin implements KioskPlugin {
             });
         }
 
-        void start() { worker.scheduleWithFixedDelay(this::tick, 0, 1, TimeUnit.SECONDS); }
+        void start() { updateActivity(); }
+
+        // Called only under the plugin lock by lifecycle callbacks. No timer or
+        // HTTP work is scheduled until this particular renderer is visible.
+        void updateActivity() {
+            boolean visible = !closed && active && screenOn && VIEW.equals(view);
+            if (running == visible) return;
+            if (visible) {
+                dav.setActive(true);
+                activityRevision++;
+                resetDwell = true;
+                running = true;
+                loop = worker.scheduleWithFixedDelay(this::tick, 0, 1, TimeUnit.SECONDS);
+            } else {
+                running = false;
+                activityRevision++;
+                dav.setActive(false);
+                if (loop != null) loop.cancel(false);
+                loop = null;
+            }
+        }
+
+        boolean working(long revision) { return !closed && running && activityRevision == revision; }
         long now() { return clock.getAsLong(); }
 
         void tick() {
-            if (closed || now() < processingRetryAt) return;
+            long revision = activityRevision;
+            if (!working(revision) || now() < processingRetryAt) return;
             try {
                 long now = now();
                 if (refresh || now >= refreshAt) {
                     refresh = false;
                     try {
                         List<DavClient.Photo> listed = dav.list();
-                        if (closed) return;
+                        if (!working(revision)) { refresh = true; return; }
                         photos = listed;
                         Set<String> valid = new HashSet<>();
                         for (DavClient.Photo photo : photos) valid.add(photo.key());
@@ -139,18 +176,20 @@ public final class NextcloudPlugin implements KioskPlugin {
                             publish(Renderer.message("No JPEG, PNG or WebP photos found in the selected folders."));
                         }
                     } catch (IOException error) {
+                        if (!working(revision)) { refresh = true; return; }
                         refreshAt = now() + 30_000;
                         report(connectionError(error), true);
                         if (current == null) publish(Renderer.message(connectionError(error)));
                     }
                 }
-                if (closed || photos.isEmpty()) return;
+                if (!working(revision) || photos.isEmpty()) return;
                 if (resetDwell) { resetDwell = false; nextAt = now() + config.seconds * 1000L; }
                 boolean forced = advance;
                 advance = false;
                 if (current == null || forced || (active && screenOn && now() >= nextAt)) {
                     DavClient.Photo candidate = next();
-                    byte[] image = cachedOrDownload(candidate);
+                    byte[] image = cachedOrDownload(candidate, revision);
+                    if (!working(revision)) return;
                     if (image == null) {
                         // Continue rotating the bounded cache while the server is unavailable.
                         for (int i = 0; i < photos.size(); i++) {
@@ -165,10 +204,9 @@ public final class NextcloudPlugin implements KioskPlugin {
                     }
                     nextAt = now() + (image == null ? 30_000 : config.seconds * 1000L);
                 }
-                // Prefetch one upcoming photo; no continuous slideshow downloads while idle or screen-off.
-                if (!closed && current != null && (active && screenOn || cache.size() < 2)) {
+                if (working(revision) && current != null) {
                     ensureCycle();
-                    cachedOrDownload(cycle.get(cursor));
+                    cachedOrDownload(cycle.get(cursor), revision);
                 }
             } catch (OutOfMemoryError error) {
                 // Release the largest retained buffers before calling the host.
@@ -177,13 +215,13 @@ public final class NextcloudPlugin implements KioskPlugin {
                 processingRetryAt = now() + 30_000;
                 nextAt = processingRetryAt;
                 if (photos.isEmpty()) refresh = true;
-                try { if (!closed) report(MEMORY_WARNING, true); }
+                try { if (working(revision)) report(MEMORY_WARNING, true); }
                 catch (OutOfMemoryError ignored) { /* the next scheduled tick may recover */ }
             } catch (RuntimeException error) {
                 // Do not expose raw exception strings, which may contain private URLs or credentials.
                 processingRetryAt = now() + 30_000;
                 nextAt = processingRetryAt;
-                try { if (!closed) report("Photo processing failed. Try another photo or a smaller folder.", true); }
+                try { if (working(revision)) report("Photo processing failed. Try another photo or a smaller folder.", true); }
                 catch (OutOfMemoryError ignored) { cache.clear(); }
             }
         }
@@ -198,17 +236,19 @@ public final class NextcloudPlugin implements KioskPlugin {
 
         private DavClient.Photo next() { ensureCycle(); return cycle.get(cursor++); }
 
-        private byte[] cachedOrDownload(DavClient.Photo photo) {
+        private byte[] cachedOrDownload(DavClient.Photo photo, long revision) {
+            if (!working(revision)) return null;
             byte[] image = cache.get(photo.key());
             if (image != null || closed || now() < networkRetryAt) return image;
             try {
                 image = encoder.encode(dav.download(photo));
-                if (closed) return null;
+                if (!working(revision)) return null;
                 cache.put(photo.key(), image);
                 while (cache.size() > config.cachePhotos) cache.remove(cache.keySet().iterator().next());
                 report(photos.size() + " photos available; " + cache.size() + " cached.", false);
                 return image;
             } catch (IOException error) {
+                if (!working(revision)) return null;
                 networkRetryAt = now() + 30_000;
                 report(connectionError(error), true);
                 if (current == null) publish(Renderer.message(connectionError(error)));
@@ -244,6 +284,8 @@ public final class NextcloudPlugin implements KioskPlugin {
 
         @Override public void close() {
             closed = true;
+            running = false;
+            activityRevision++;
             worker.shutdownNow();
             dav.close();
         }
