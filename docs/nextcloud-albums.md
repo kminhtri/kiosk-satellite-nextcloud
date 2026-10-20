@@ -18,6 +18,8 @@ Each component is encoded as a URL path segment. A `PROPFIND` with `Depth: 1` re
 
 Images are fetched with GET on those album hrefs. Redirects, external origins, embedded credentials, queries, fragments, encoded separators, parent paths, unselected albums and deeper album descendants are rejected. Original-path and remote download URL properties are not requested or followed. Albums never contribute recursive children, even when **Include subfolders** is enabled for Files folders.
 
+If an original download exceeds 8 MiB, the client can use Nextcloud's authenticated `/index.php/core/preview` endpoint on the configured origin and installation subpath. It uses the selected photo's numeric `oc:fileid`, requests `x=1920`, `y=1920`, `a=1`, `mode=cover`, `forceIcon=0` and `mimeFallback=0`, and keeps the same 8 MiB response cap. This URL is constructed locally, with no server-supplied download or preview URL. Redirects are still refused. JPEG, PNG or WebP previews are required; a missing preview or file ID produces an actionable error. Preview downloads share the same visibility gating and cancellation as original downloads.
+
 The 32 selected-source, 100 scanned-collection and 5000 unique-photo limits are shared by folders and albums. Nextcloud file IDs deduplicate photos across all selected sources when provided; otherwise deduplication uses the DAV URL. Folder identity checks remain separate from album collection IDs.
 
 The WebDAV fixture mirrors the protocol described by the upstream implementation, without copying its server code:
@@ -27,3 +29,4 @@ The WebDAV fixture mirrors the protocol described by the upstream implementation
 - [Photo name, content type and ETag](https://github.com/nextcloud/photos/blob/master/lib/Sabre/CollectionPhoto.php)
 - [File ID property](https://github.com/nextcloud/photos/blob/master/lib/Sabre/PropFindPlugin.php)
 - [GET on album photos](https://github.com/nextcloud/photos/blob/master/lib/Sabre/Album/AlbumPhoto.php)
+- [Authenticated preview by file ID](https://github.com/nextcloud/server/blob/master/core/Controller/PreviewController.php)
