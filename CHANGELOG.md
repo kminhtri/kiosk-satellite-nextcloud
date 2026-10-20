@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Use an authenticated Nextcloud preview by file ID when an original photo exceeds 8 MiB, without increasing the per-response memory cap.
+- Preserve the 0.3.0 folder settings, cache limits, visibility-based suspension and redirect protections.
+- Distinguish folder-listing, original-photo and preview size errors, and explain when previews are unavailable.
+- Add regressions for large originals, unknown-length downloads, unavailable/oversized previews, invalid file IDs and first-photo loading.
+
 ## 0.3.0
 
 - Rename the plugin and screensaver to Nextcloud Photo Frame, preserving the existing plugin ID, settings and schedules.
