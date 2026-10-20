@@ -21,6 +21,7 @@ public final class NextcloudTest {
         configAndXml();
         rendererBudget();
         multipleFolders();
+        previewFallback();
         try (Fixture fixture = new Fixture()) {
             webdav(fixture);
             slideshow(fixture);
@@ -107,6 +108,61 @@ public final class NextcloudTest {
         check(Renderer.photo(new byte[1], false).contains("object-fit:contain"), "Fit uses contain");
         check(!Renderer.message("<script>\"&").contains("<script>"), "escape status HTML");
         expectFailure(() -> Renderer.photo(new byte[AndroidImageEncoder.MAX_JPEG + 1], false), "reject oversized image");
+    }
+
+    static void previewFallback() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            Map<String, Object> values = settings(fixture.url() + "/nextcloud/");
+            fixture.directoryListing = path -> listing(entry(path + "42-large.jpg", false, "image/jpeg", "v1", "42"));
+            Config config = new Config(values);
+            try (DavClient client = new DavClient(config)) {
+                DavClient.Photo photo = client.list().get(0);
+                int previews = fixture.previewGets.get();
+                check(client.download(photo).length == 3 && fixture.previewGets.get() == previews, "small original does not request a preview");
+                fixture.oversizedImage = true;
+                check(Arrays.equals(client.download(photo), new byte[] {7, 8, 9}) && fixture.previewGets.get() == previews + 1, "oversized original falls back to a bounded preview");
+                check(fixture.previewUrl.encodedPath().equals("/nextcloud/index.php/core/preview")
+                        && fixture.previewUrl.queryParameter("fileId").equals("42")
+                        && fixture.previewUrl.queryParameter("x").equals("1920") && fixture.previewUrl.queryParameter("y").equals("1920")
+                        && fixture.previewUrl.queryParameter("a").equals("1") && fixture.previewUrl.queryParameter("mode").equals("cover")
+                        && fixture.previewUrl.queryParameter("forceIcon").equals("0") && fixture.previewUrl.queryParameter("mimeFallback").equals("0"), "preview preserves installation prefix, aspect ratio and file ID without icon fallback");
+                fixture.previewStatus = 404;
+                try { client.download(photo); throw new AssertionError("missing preview must fail"); }
+                catch (IOException error) { check(error.getMessage().contains("Enable image previews"), "disabled previews have an actionable error"); }
+                fixture.previewStatus = 302;
+                expectFailure(() -> client.download(photo), "preview redirects are refused");
+                check(fixture.redirectHits.get() == 0, "preview authentication never follows redirects");
+                fixture.previewStatus = 200;
+                fixture.oversizedPreview = true;
+                try { client.download(photo); throw new AssertionError("oversized preview must fail"); }
+                catch (IOException error) { check(error.getMessage().equals(DavClient.PREVIEW_SIZE_ERROR), "preview keeps the 8 MiB cap and identifies its own limit"); }
+                fixture.oversizedPreview = false;
+                fixture.invalidPreviewType = true;
+                expectFailure(() -> client.download(photo), "preview HTML or icons cannot enter the image decoder");
+                fixture.invalidPreviewType = false;
+                previews = fixture.previewGets.get();
+                for (String id : Arrays.asList("", "../42", "https://evil.example", "42&fileId=43"))
+                    expectFailure(() -> client.download(new DavClient.Photo(photo.url, "", id)), "invalid file ID cannot select a preview");
+                expectFailure(() -> client.download(new DavClient.Photo(HttpUrl.get(fixture.url() + "/unselected/x.jpg"), "", "42")), "out-of-scope photo cannot trigger a preview");
+                check(fixture.previewGets.get() == previews, "invalid IDs and unselected sources never reach preview endpoint");
+                fixture.chunkedImage = true;
+                check(Arrays.equals(client.download(photo), new byte[] {7, 8, 9}), "unknown-length oversized original also uses a preview");
+                fixture.chunkedImage = false;
+                fixture.oversizedImage = false;
+            }
+            fixture.oversizedImage = true;
+            Host host = new Host();
+            NextcloudPlugin plugin = new NextcloudPlugin(original -> original, () -> 1L);
+            plugin.start(host, values);
+            try {
+                int previews = fixture.previewGets.get();
+                Thread.sleep(1100);
+                check(fixture.previewGets.get() == previews, "preview fallback makes no idle requests");
+                show(plugin);
+                await(() -> host.images.get() > 0, "first oversized folder photo loads through its preview");
+            } finally { plugin.stop(); }
+            check(fixture.badAuth.get() == 0 && fixture.badAgent.get() == 0, "preview requests use app password and versioned User-Agent");
+        }
     }
 
     static void multipleFolders() throws Exception {
@@ -204,8 +260,14 @@ public final class NextcloudTest {
             try {
                 client.download(photos.get(0));
                 throw new AssertionError("9 MiB image must exceed download cap");
-            } catch (IOException expected) { check(expected.getMessage().contains("size limit"), "reject 9 MiB Content-Length before buffering"); }
+            } catch (IOException expected) { check(expected.getMessage().startsWith(DavClient.PHOTO_SIZE_ERROR) && expected.getMessage().contains("file ID"), "oversized photo without ID identifies the 8 MiB limit and unavailable fallback"); }
             finally { fixture.oversizedImage = false; }
+            fixture.oversizedListing = true;
+            try {
+                client.list();
+                throw new AssertionError("oversized listing must exceed listing cap");
+            } catch (IOException expected) { check(expected.getMessage().equals(DavClient.LIST_SIZE_ERROR), "oversized listing identifies the distinct 4 MiB XML limit"); }
+            finally { fixture.oversizedListing = false; }
             fixture.mode = 401;
             expectFailure(client::list, "authentication failure");
             fixture.mode = 302;
@@ -234,9 +296,9 @@ public final class NextcloudTest {
         };
         ResponseBody chunked = ResponseBody.create(MediaType.parse("image/jpeg"), -1, okio.Okio.buffer(okio.Okio.source(stream)));
         try {
-            DavClient.read(chunked, DavClient.MAX_IMAGE);
+            DavClient.read(chunked, DavClient.MAX_IMAGE, DavClient.PHOTO_SIZE_ERROR);
             throw new AssertionError("9 MiB stream without Content-Length must exceed download cap");
-        } catch (IOException expected) { check(expected.getMessage().contains("size limit"), "unknown-length image also stops at 8 MiB"); }
+        } catch (IOException expected) { check(expected.getMessage().equals(DavClient.PHOTO_SIZE_ERROR), "unknown-length image reports the same 8 MiB limit"); }
         check(streamed.get() <= 8 * 1024 * 1024 + 8192, "unknown-length response stops reading promptly at the cap");
         check(fixture.badAuth.get() == 0 && fixture.badDepth.get() == 0, "all requests carry correct authentication and depth");
         check(fixture.badAgent.get() == 0, "User-Agent matches the package version");
@@ -465,6 +527,11 @@ public final class NextcloudTest {
         volatile int mode;
         volatile boolean failImages;
         volatile boolean oversizedImage;
+        volatile boolean oversizedListing;
+        final AtomicInteger previewGets = new AtomicInteger();
+        volatile HttpUrl previewUrl;
+        volatile int previewStatus = 200;
+        volatile boolean oversizedPreview, invalidPreviewType, chunkedImage;
         volatile CountDownLatch block, entered;
         final String root = "/remote.php/dav/files/alice/Photos/";
         Fixture() throws IOException {
@@ -489,7 +556,17 @@ public final class NextcloudTest {
                     send(exchange, mode, "login".getBytes(StandardCharsets.UTF_8)); return;
                 }
                 String path = exchange.getRequestURI().getPath();
+                if (path.endsWith("/index.php/core/preview")) {
+                    previewGets.incrementAndGet();
+                    previewUrl = HttpUrl.get(url() + exchange.getRequestURI());
+                    if (previewStatus == 302) exchange.getResponseHeaders().set("Location", url() + "/redirect-target");
+                    exchange.getResponseHeaders().set("Content-Type", invalidPreviewType ? "text/html" : "image/jpeg");
+                    if (oversizedPreview) { exchange.sendResponseHeaders(200, DavClient.MAX_IMAGE + 1); return; }
+                    send(exchange, previewStatus, new byte[] {7, 8, 9});
+                    return;
+                }
                 if (exchange.getRequestMethod().equals("PROPFIND")) {
+                    if (oversizedListing) { exchange.sendResponseHeaders(207, DavClient.MAX_XML + 1); return; }
                     propfinds.incrementAndGet();
                     if (!"1".equals(exchange.getRequestHeaders().getFirst("Depth"))) badDepth.incrementAndGet();
                     String xml = directoryListing != null ? directoryListing.apply(path) : path.equals(root) ? listing(entry(root, true, "", "") + entry(root + "a.jpg", false, "image/jpeg", "a1")
@@ -499,6 +576,14 @@ public final class NextcloudTest {
                     send(exchange, 207, xml.getBytes(StandardCharsets.UTF_8));
                 } else if (exchange.getRequestMethod().equals("GET")) {
                     gets.incrementAndGet();
+                    if (chunkedImage) {
+                        exchange.sendResponseHeaders(200, 0);
+                        byte[] chunk = new byte[8192];
+                        try {
+                            for (int n = 0; n <= DavClient.MAX_IMAGE / chunk.length; n++) exchange.getResponseBody().write(chunk);
+                        } catch (IOException ignored) { /* bounded client closes this response early */ }
+                        return;
+                    }
                     if (oversizedImage) { exchange.sendResponseHeaders(200, 9 * 1024 * 1024); return; }
                     send(exchange, failImages ? 503 : 200, new byte[] {(byte) (path.contains("a.jpg") ? 1 : path.contains("b.png") ? 2 : 3), 2, 3});
                 } else send(exchange, 405, new byte[0]);

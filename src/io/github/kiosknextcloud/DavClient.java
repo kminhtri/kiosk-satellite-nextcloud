@@ -10,9 +10,12 @@ import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 import okhttp3.*;
 
-/** All requests stay within selected folders and never follow redirects with credentials. */
+/** DAV requests stay within selected folders; oversized photos use same-server previews by file ID. */
 final class DavClient implements AutoCloseable {
     static final int MAX_XML = 4 * 1024 * 1024, MAX_IMAGE = 8 * 1024 * 1024;
+    static final String LIST_SIZE_ERROR = "Nextcloud folder listing exceeded the 4 MiB size limit. Select a smaller source.";
+    static final String PHOTO_SIZE_ERROR = "Nextcloud photo exceeded the 8 MiB download size limit. Use a smaller JPEG, PNG or WebP copy.";
+    static final String PREVIEW_SIZE_ERROR = "Nextcloud photo preview exceeded the 8 MiB download size limit. Use a smaller JPEG, PNG or WebP copy.";
     static final int MAX_FOLDERS = 100, MAX_DEPTH = 20, MAX_PHOTOS = 5000;
     static final String PROPERTIES = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop>"
             + "<d:resourcetype/><d:getcontenttype/><d:getetag/><oc:fileid/></d:prop></d:propfind>";
@@ -42,6 +45,10 @@ final class DavClient implements AutoCloseable {
         String directoryId = "";
     }
 
+    static final class ResponseSizeException extends IOException {
+        ResponseSizeException(String message) { super(message); }
+    }
+
     DavClient(Config config) {
         this.config = config;
         http = new OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
@@ -68,7 +75,7 @@ final class DavClient implements AutoCloseable {
             Call call = newCall(request);
             try (Response response = call.execute()) {
                 require(response, 207);
-                listing = parse(read(response.body(), MAX_XML), directory, directory);
+                listing = parse(read(response.body(), MAX_XML, LIST_SIZE_ERROR), directory, directory);
             } finally { finished(call); }
             String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
             if (!id.isEmpty() && !visitedIds.add(id)) continue;
@@ -97,10 +104,30 @@ final class DavClient implements AutoCloseable {
         boolean allowed = false;
         for (HttpUrl root : config.folders) allowed |= within(photo.url, root);
         if (!allowed) throw new IOException("Photo address is outside the configured folders.");
-        Call call = newCall(request(photo.url).get().build());
+        try {
+            return download(photo.url, PHOTO_SIZE_ERROR, false);
+        } catch (ResponseSizeException error) {
+            // Keep the original and preview transfers bounded independently.
+            // Only use the file ID from this selected DAV entry, never a server-supplied preview URL.
+            if (!photo.id.matches("[1-9][0-9]{0,18}"))
+                throw new IOException(PHOTO_SIZE_ERROR + " No usable Nextcloud file ID is available for a preview.");
+            HttpUrl preview = config.preview.newBuilder().addQueryParameter("fileId", photo.id)
+                    .addQueryParameter("x", "1920").addQueryParameter("y", "1920").addQueryParameter("a", "1")
+                    .addQueryParameter("mode", "cover").addQueryParameter("forceIcon", "0").addQueryParameter("mimeFallback", "0").build();
+            return download(preview, PREVIEW_SIZE_ERROR, true);
+        }
+    }
+
+    private byte[] download(HttpUrl url, String sizeError, boolean preview) throws IOException {
+        Call call = newCall(request(url).get().build());
         try (Response response = call.execute()) {
+            if (preview && response.code() == 404)
+                throw new IOException("Nextcloud photo exceeds 8 MiB and no preview is available. Enable image previews on Nextcloud or use a smaller copy.");
             require(response, 200);
-            return read(response.body(), MAX_IMAGE);
+            if (preview && !Arrays.asList("image/jpeg", "image/png", "image/webp").contains(
+                    response.header("Content-Type", "").split(";", 2)[0].trim().toLowerCase(Locale.ROOT)))
+                throw new IOException("Nextcloud did not return a supported photo preview. Enable image previews or use a smaller copy.");
+            return read(response.body(), MAX_IMAGE, sizeError);
         } finally { finished(call); }
     }
 
@@ -140,14 +167,18 @@ final class DavClient implements AutoCloseable {
     }
 
     static byte[] read(ResponseBody body, int limit) throws IOException {
+        return read(body, limit, "Nextcloud response exceeded the size limit.");
+    }
+
+    static byte[] read(ResponseBody body, int limit, String sizeError) throws IOException {
         if (body == null) throw new IOException("Empty response from Nextcloud.");
-        if (body.contentLength() > limit) throw new IOException("Nextcloud response exceeded the size limit.");
+        if (body.contentLength() > limit) throw new ResponseSizeException(sizeError);
         ByteArrayOutputStream result = new ByteArrayOutputStream();
         try (InputStream in = body.byteStream()) {
             byte[] buffer = new byte[8192];
             int count;
             while ((count = in.read(buffer)) != -1) {
-                if (result.size() + count > limit) throw new IOException("Nextcloud response exceeded the size limit.");
+                if (result.size() + count > limit) throw new ResponseSizeException(sizeError);
                 result.write(buffer, 0, count);
             }
         }

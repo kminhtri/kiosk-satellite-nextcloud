@@ -6,7 +6,7 @@ import okhttp3.HttpUrl;
 import okhttp3.Credentials;
 
 final class Config {
-    final HttpUrl folder;
+    final HttpUrl folder, preview;
     final List<HttpUrl> folders;
     final String authorization;
     final boolean recursive, shuffle, fill;
@@ -27,6 +27,7 @@ final class Config {
         HttpUrl.Builder url = base.newBuilder();
         // Keep an installation subpath, removing only its trailing empty segment.
         if (base.pathSegments().get(base.pathSize() - 1).isEmpty()) url.removePathSegment(base.pathSize() - 1);
+        preview = url.build().newBuilder().addPathSegment("index.php").addPathSegment("core").addPathSegment("preview").build();
         url.addPathSegment("remote.php").addPathSegment("dav").addPathSegment("files").addPathSegment(username);
         LinkedHashSet<HttpUrl> selected = new LinkedHashSet<>();
         folder = folderUrl(url, text(values, "folder", "Photos"));
