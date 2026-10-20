@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Rename the plugin and screensaver to Nextcloud Photo Frame, preserving the existing plugin ID, settings and schedules.
+- Cap each original photo download at 8 MiB instead of 24 MiB.
+- Recover from OutOfMemoryError in the slideshow worker by clearing the cache and backing off for 30 seconds, including when reporting memory pressure also fails.
+- Load, refresh, rotate, prefetch and retry only while this renderer is visible and the screen is on. Cancel in-flight HTTP calls and suspend the timer when it is hidden; defer manual actions until it returns.
+- Derive the User-Agent from the effective package version, including release-tag overrides.
+- Produce mapping.txt from R8 and include it in CI artifacts and GitHub release uploads.
+- Include the Nextcloud/photo-stack plugin icon.
+
+
 ## 0.2.0
 
 - Combine the existing photo folder with up to 31 additional folders from the same Nextcloud account.
