@@ -8,6 +8,12 @@ Requires Android 7.0+ and a current Kiosk Satellite version with SDK 1 custom sc
 
 ### Install from GitHub
 
+[![Install in Kiosk Satellite](https://kiosksatellite.com/img/badges/plugin-add.svg)](https://kiosksatellite.com/redirect/plugin/?repository=kminhtri/kiosk-satellite-nextcloud)
+
+Click the button, enter your kiosk's Remote Admin address if asked, then review the plugin and choose **Trust and install**. Remote Admin must be enabled on the kiosk. The installer may show an unlisted-plugin notice until the plugin is approved for Community Plugins.
+
+You can also install it manually:
+
 1. Open **Settings → Plugin Manager** and turn on **Enable Plugins**.
 2. Choose **Add plugin**, paste `https://github.com/kminhtri/kiosk-satellite-nextcloud`, and select **Preview**.
 3. Review the source and permissions, choose **Trust and install**, then enable **Nextcloud Photos**.
