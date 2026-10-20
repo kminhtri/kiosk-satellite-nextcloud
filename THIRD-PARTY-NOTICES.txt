@@ -1,0 +1,19 @@
+Nextcloud Photos for Kiosk Satellite
+
+Includes the Kiosk Satellite plugin SDK and build tooling.
+Copyright jxlarrea and contributors. Licensed under Apache License 2.0.
+https://github.com/jxlarrea/kiosk-satellite-plugins
+
+Includes OkHttp 4.12.0 and Okio 3.6.0.
+Copyright Square, Inc. Licensed under Apache License 2.0.
+https://github.com/square/okhttp
+https://github.com/square/okio
+
+Includes Kotlin Standard Library 1.8.21 and JetBrains annotations 13.0.
+Copyright JetBrains s.r.o. and Kotlin Programming Language contributors.
+Licensed under Apache License 2.0.
+https://github.com/JetBrains/kotlin
+https://github.com/JetBrains/java-annotations
+
+A copy of the Apache License 2.0 is included in LICENSE.
+No affiliation with Nextcloud GmbH or the Kiosk Satellite project is implied.

@@ -1,548 +1,139 @@
 {
   "schemaVersion": 1,
-  "id": "hello-world",
-  "name": "Hello World",
-  "version": "1.0.1",
+  "id": "nextcloud-photos",
+  "name": "Nextcloud Photos",
+  "version": "0.1.1",
   "apiVersion": 1,
   "minAndroidSdk": 24,
-  "entryClass": "me.jxl.kiosk.plugins.hello.HelloWorldPlugin",
-  "description": "A sample plugin that showcases the SDK capabilities. Use this plugin as a starting point for your own.",
-  "author": "jxlarrea",
+  "entryClass": "io.github.kiosknextcloud.NextcloudPlugin",
+  "description": "Photo screensaver from a Nextcloud WebDAV folder, with shuffle and a bounded in-memory offline cache.",
+  "author": "kminhtri",
   "license": "Apache-2.0",
   "capabilities": [
-    "overlay",
-    "entities",
-    "shizuku",
     "screensaver",
-    "host.read",
-    "ha",
-    "voice.skin",
-    "voice.text",
-    "camera",
-    "barcode",
-    "ma"
+    "host.read"
   ],
-  "icon": "icon.png",
-  "voiceSkinThumbnail": "voice-skin.webp",
   "settings": [
     {
-      "key": "message",
+      "key": "serverUrl",
       "type": "string",
-      "title": "Greeting",
-      "default": "Hello from a Kiosk Satellite plugin!",
-      "group": "Greeting window",
-      "description": "Text input: the message in the floating window."
-    },
-    {
-      "key": "showOnStart",
-      "type": "boolean",
-      "title": "Show window when enabled",
-      "default": true,
-      "group": "Greeting window",
-      "description": "Toggle: open the floating window when the plugin starts."
-    },
-    {
-      "key": "showChart",
-      "type": "boolean",
-      "title": "Show demo chart",
-      "default": true,
-      "group": "Chart demo",
-      "description": "Display simulated data in the plugin subpage."
-    },
-    {
-      "key": "chartType",
-      "type": "select",
-      "title": "Chart type",
-      "default": "Line",
-      "options": [
-        "Line",
-        "Bar"
-      ],
-      "group": "Chart demo",
-      "description": "Display samples as lines or grouped bars."
-    },
-    {
-      "key": "chartSize",
-      "type": "select",
-      "title": "Chart size",
-      "default": "Regular",
-      "options": [
-        "Regular",
-        "Mini"
-      ],
-      "group": "Chart demo",
-      "description": "Use a full chart with axes or a compact mini chart."
-    },
-    {
-      "key": "amplitude",
-      "type": "number",
-      "title": "Amplitude",
-      "default": 60,
-      "min": 0,
-      "max": 100,
-      "step": 5,
-      "unit": "%",
-      "group": "Chart demo",
-      "description": "Slider: adjust the height of new simulated samples."
-    },
-    {
-      "key": "pattern",
-      "type": "select",
-      "title": "Pattern",
-      "default": "Sine",
-      "options": [
-        "Sine",
-        "Triangle"
-      ],
-      "group": "Chart demo",
-      "description": "Selection: choose the shape of new simulated samples."
-    },
-    {
-      "key": "seriesColor",
-      "type": "color",
-      "title": "Series color",
-      "default": "#1976D2",
-      "group": "Chart demo",
-      "description": "Color picker: set the Wave series color."
-    },
-    {
-      "key": "shizukuDemo",
-      "type": "boolean",
-      "title": "Enable Shizuku demo",
-      "default": false,
-      "group": "Shizuku demo",
-      "description": "Read a device diagnostic through Shizuku every 10 seconds. Results appear in Readings."
-    },
-    {
-      "key": "shizukuDiagnostic",
-      "type": "select",
-      "title": "Diagnostic",
-      "default": "Process identity",
-      "options": [
-        "Process identity",
-        "Android version",
-        "Kernel version"
-      ],
-      "group": "Shizuku demo",
-      "description": "Choose the read-only command to run after granting Shizuku access."
-    },
-    {
-      "key": "showStatusTile",
-      "type": "boolean",
-      "title": "Show status tile",
-      "default": true,
-      "group": "Status tile demo",
-      "description": "Toggle: publish a Hello World tile on the Remote Admin Overview Status panel."
-    },
-    {
-      "key": "statusLevel",
-      "type": "select",
-      "title": "Tile level",
-      "default": "Healthy",
-      "options": [
-        "Healthy",
-        "Attention",
-        "Problem",
-        "Muted"
-      ],
-      "group": "Status tile demo",
-      "description": "Selection: the dot color. Healthy is green, Attention amber, Problem red and Muted gray."
-    },
-    {
-      "key": "statusText",
-      "type": "string",
-      "title": "Tile text",
-      "default": "Simulated data flowing",
-      "group": "Status tile demo",
-      "description": "Text input: the one-line state under the tile title, up to 80 characters."
-    },
-    {
-      "key": "showKeys",
-      "type": "boolean",
-      "title": "Show hardware keys",
-      "default": true,
-      "group": "Hardware keys demo",
-      "description": "Subscribe to hardware key presses. The last key appears in Readings."
-    },
-    {
-      "key": "showVoice",
-      "type": "boolean",
-      "title": "Show Voice Satellite state",
-      "default": true,
-      "group": "Voice Satellite demo",
-      "description": "Follow this kiosk's voice turns: idle, listening, processing or responding. The state appears in Readings."
-    },
-    {
-      "key": "showIntercom",
-      "type": "boolean",
-      "title": "Show intercom state",
-      "default": true,
-      "group": "Intercom demo",
-      "description": "Follow this kiosk's intercom calls and announcements. The state appears in Readings."
-    },
-    {
-      "key": "dvdLogoSize",
-      "type": "number",
-      "title": "Logo size",
-      "default": 100,
-      "min": 50,
-      "max": 200,
-      "step": 5,
-      "unit": "%",
-      "group": "Screensaver demo",
-      "description": "Resize the bouncing DVD logo. 100% uses the original size."
-    },
-    {
-      "key": "dvdLogoColor",
-      "type": "color",
-      "title": "Logo color",
-      "default": "#00D4FF",
-      "group": "Screensaver demo",
-      "description": "DVD logo color. Select DVD Logo (Hello World) in Screensaver mode to use this demo."
-    },
-    {
-      "key": "dvdBackgroundColor",
-      "type": "color",
-      "title": "Background color",
-      "default": "#000000",
-      "group": "Screensaver demo",
-      "description": "Background behind the bouncing logo. Uses all stock screensaver settings."
-    },
-    {
-      "key": "haEntity",
-      "type": "entity",
-      "title": "Home Assistant entity",
+      "title": "Nextcloud server URL",
       "default": "",
-      "group": "Home Assistant demo",
-      "description": "Choose an entity to show its state, follow its changes and toggle it through Kiosk Satellite."
+      "group": "Connection",
+      "description": "Include any installation subpath, for example https://cloud.example.com/nextcloud."
     },
     {
-      "key": "shortcuts",
-      "type": "list",
-      "title": "Shortcuts",
-      "group": "List demo",
-      "addTitle": "Add shortcut",
-      "maxItems": 8,
-      "description": "Each row is a small form. Drag a row by its handle to reorder it.",
-      "row": {
-        "title": "label",
-        "subtitle": [
-          "page",
-          "camera",
-          "opens"
-        ],
-        "icon": "icon"
-      },
-      "default": [
-        {
-          "label": "Home",
-          "icon": "mdi:home",
-          "opens": "Page",
-          "page": "lovelace/0"
-        }
-      ],
-      "fields": [
-        {
-          "key": "label",
-          "type": "string",
-          "title": "Label",
-          "required": true
-        },
-        {
-          "key": "icon",
-          "type": "icon",
-          "title": "Icon"
-        },
-        {
-          "key": "opens",
-          "type": "select",
-          "title": "Opens",
-          "options": [
-            "Page",
-            "Camera view",
-            "Menu"
-          ]
-        },
-        {
-          "key": "page",
-          "type": "dashboard",
-          "title": "Page",
-          "required": true,
-          "visibleWhen": {
-            "key": "opens",
-            "equals": "Page"
-          }
-        },
-        {
-          "key": "camera",
-          "type": "cameraView",
-          "title": "Camera view",
-          "required": true,
-          "visibleWhen": {
-            "key": "opens",
-            "equals": "Camera view"
-          }
-        },
-        {
-          "key": "entries",
-          "type": "list",
-          "title": "Menu entries",
-          "addTitle": "Add entry",
-          "minItems": 1,
-          "maxItems": 6,
-          "description": "A nested list opens inside the same editor.",
-          "visibleWhen": {
-            "key": "opens",
-            "equals": "Menu"
-          },
-          "row": {
-            "title": "label",
-            "subtitle": "page"
-          },
-          "fields": [
-            {
-              "key": "label",
-              "type": "string",
-              "title": "Label",
-              "required": true
-            },
-            {
-              "key": "page",
-              "type": "dashboard",
-              "title": "Page"
-            }
-          ]
-        }
+      "key": "username",
+      "type": "string",
+      "title": "Username",
+      "default": "",
+      "group": "Connection",
+      "description": "Your Nextcloud login name."
+    },
+    {
+      "key": "appPassword",
+      "type": "secret",
+      "title": "App password",
+      "default": "",
+      "group": "Connection",
+      "description": "Create an app password in Nextcloud personal Security settings."
+    },
+    {
+      "key": "folder",
+      "type": "string",
+      "title": "Photo folder",
+      "default": "Photos",
+      "group": "Connection",
+      "description": "Folder relative to your Nextcloud Files home. This is a folder, not a virtual Photos album."
+    },
+    {
+      "key": "includeSubfolders",
+      "type": "boolean",
+      "title": "Include subfolders",
+      "default": false,
+      "group": "Connection",
+      "description": "Recursively list folders, up to 100 folders and 5000 photos."
+    },
+    {
+      "key": "secondsPerPhoto",
+      "type": "number",
+      "title": "Seconds per photo",
+      "default": 30,
+      "group": "Slideshow",
+      "description": "The interval starts once a photo is ready.",
+      "min": 5,
+      "max": 600,
+      "step": 5,
+      "unit": "s"
+    },
+    {
+      "key": "shuffle",
+      "type": "boolean",
+      "title": "Shuffle",
+      "default": true,
+      "group": "Slideshow",
+      "description": "Play a shuffled cycle without repeating until the cycle ends."
+    },
+    {
+      "key": "fit",
+      "type": "select",
+      "title": "Photo scaling",
+      "default": "Fit",
+      "group": "Slideshow",
+      "description": "Fit shows the whole photo; Fill crops it to cover the screen.",
+      "options": [
+        "Fit",
+        "Fill"
       ]
     },
     {
-      "key": "favoritePage",
-      "type": "dashboard",
-      "title": "Favorite page",
-      "default": "",
-      "group": "List demo",
-      "description": "Picked from your Home Assistant dashboards."
+      "key": "refreshMinutes",
+      "type": "number",
+      "title": "Refresh folder every",
+      "default": 15,
+      "group": "Slideshow",
+      "description": "Minutes between directory refreshes.",
+      "min": 1,
+      "max": 1440,
+      "step": 1,
+      "unit": "min"
     },
     {
-      "key": "featuredIcon",
-      "type": "icon",
-      "title": "Featured icon",
-      "default": "mdi:star",
-      "group": "List demo",
-      "description": "Picked from every Material Design Icon."
+      "key": "cachePhotos",
+      "type": "number",
+      "title": "Photos to keep in memory",
+      "default": 12,
+      "group": "Slideshow",
+      "description": "Cached photos remain available during connection failures until the plugin stops.",
+      "min": 2,
+      "max": 30,
+      "step": 1
     },
     {
-      "key": "showCamera",
+      "key": "allowHttp",
       "type": "boolean",
-      "title": "Use a camera view",
+      "title": "Allow unencrypted HTTP",
       "default": false,
-      "group": "List demo",
-      "description": "Shows the next setting, which stays hidden while this is off."
-    },
-    {
-      "key": "cameraView",
-      "type": "cameraView",
-      "title": "Camera view",
-      "default": "",
-      "group": "List demo",
-      "visibleWhen": {
-        "key": "showCamera",
-        "equals": true
-      }
-    },
-    {
-      "key": "setupAddress",
-      "type": "string",
-      "title": "Device address",
-      "default": "demo.local",
-      "group": "Setup demo",
-      "description": "Text input: the pretend device's address. Include fail in it to see an error."
-    },
-    {
-      "key": "setupDevice",
-      "type": "string",
-      "choices": "plugin",
-      "title": "Device",
-      "default": "",
-      "group": "Setup demo",
-      "visibleWhen": {
-        "key": "setupAddress",
-        "notEmpty": true
-      },
-      "description": "Plugin choices: press Refresh and the plugin looks for devices."
-    },
-    {
-      "key": "setupDeviceName",
-      "type": "string",
-      "title": "Device name",
-      "default": "",
-      "group": "Setup demo",
-      "visibleWhen": {
-        "key": "setupAddress",
-        "notEmpty": true
-      },
-      "description": "Filled in by the plugin when you pick a device."
-    }
-  ],
-  "buttons": [
-    {
-      "id": "setupTest",
-      "title": "Test connection",
-      "label": "Test",
-      "group": "Setup demo",
-      "visibleWhen": {
-        "key": "setupAddress",
-        "notEmpty": true
-      },
-      "description": "Button: checks the address and reports the result here."
-    },
-    {
-      "id": "setupPair",
-      "title": "Pair",
-      "label": "Pair",
-      "group": "Setup demo",
-      "visibleWhen": {
-        "key": "setupAddress",
-        "notEmpty": true
-      },
-      "description": "Button: asks you to trust the device's fingerprint partway through.",
-      "confirm": {
-        "title": "Pair with the device?",
-        "message": "Pairing replaces any earlier pairing of this demo.",
-        "confirmLabel": "Pair"
-      }
+      "group": "Connection",
+      "description": "Use only on a trusted local network. HTTPS is recommended."
     }
   ],
   "commands": [
     {
-      "id": "show",
-      "title": "Show window"
+      "id": "refresh",
+      "title": "Refresh photos"
     },
     {
-      "id": "hide",
-      "title": "Hide window"
-    },
-    {
-      "id": "showOverlayBar",
-      "title": "Show top bar"
-    },
-    {
-      "id": "hideOverlayBar",
-      "title": "Hide top bar"
-    },
-    {
-      "id": "showFullOverlay",
-      "title": "Show full screen overlay"
-    },
-    {
-      "id": "showGlow",
-      "title": "Show edge glow"
-    },
-    {
-      "id": "hideGlow",
-      "title": "Hide edge glow"
-    },
-    {
-      "id": "toggleEntity",
-      "title": "Toggle Home Assistant entity"
-    },
-    {
-      "id": "showCameraPreview",
-      "title": "Show camera preview"
-    },
-    {
-      "id": "hideCameraPreview",
-      "title": "Hide camera preview"
-    },
-    {
-      "id": "scanCode",
-      "title": "Scan a code"
-    },
-    {
-      "id": "playPauseMusicAssistant",
-      "title": "Play or pause Music Assistant"
-    }
-  ],
-  "triggers": [
-    {
-      "id": "hardwareKey",
-      "title": "Hardware key"
+      "id": "next",
+      "title": "Next photo"
     }
   ],
   "groups": [
     {
-      "title": "Greeting window"
+      "title": "Connection"
     },
     {
-      "title": "Chart demo",
-      "charts": [
-        "demo"
-      ],
-      "readingsTitle": "Chart readings",
-      "readings": [
-        "sensor.wave",
-        "text_sensor.status",
-        "binary_sensor.chart_active",
-        "switch.chart",
-        "select.pattern",
-        "sensor.samples",
-        "text_sensor.summary"
-      ]
-    },
-    {
-      "title": "Home Assistant demo",
-      "readingsTitle": "Home Assistant readings",
-      "readings": [
-        "text_sensor.ha_state",
-        "text_sensor.ha_details",
-        "text_sensor.ha_trigger"
-      ]
-    },
-    {
-      "title": "Shizuku demo",
-      "readingsTitle": "Shizuku readings",
-      "readings": [
-        "text_sensor.shizuku_status",
-        "text_sensor.shizuku_output"
-      ]
-    },
-    {
-      "title": "Status tile demo"
-    },
-    {
-      "title": "Hardware keys demo",
-      "readingsTitle": "Hardware key readings",
-      "readings": [
-        "text_sensor.last_key"
-      ]
-    },
-    {
-      "title": "Voice Satellite demo",
-      "readingsTitle": "Voice Satellite readings",
-      "readings": [
-        "text_sensor.voice_state"
-      ]
-    },
-    {
-      "title": "Intercom demo",
-      "readingsTitle": "Intercom readings",
-      "readings": [
-        "text_sensor.intercom_state"
-      ]
-    },
-    {
-      "title": "Screensaver demo"
-    },
-    {
-      "title": "List demo",
-      "readingsTitle": "List demo readings",
-      "readings": [
-        "text_sensor.list_summary",
-        "text_sensor.picker_values"
-      ]
-    },
-    {
-      "title": "Setup demo"
+      "title": "Slideshow"
     }
   ]
 }

@@ -11,3 +11,5 @@ __pycache__/
 benchmarks/
 
 AGENTS.md
+.deps/
+.DS_Store

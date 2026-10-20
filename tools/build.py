@@ -13,6 +13,8 @@ import zipfile
 from android_sdk import android_platform
 from plugin_manifest import build_manifest
 from plugin_assets import asset_files, MAX_PACKAGE_BYTES
+from dependencies import dependencies
+from isolate import isolate
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -21,6 +23,7 @@ parser.add_argument('--version', help='Package version override, normally suppli
 parser.add_argument('--android-platform', help='Installed platform version, for example 35 or 37.0')
 args = parser.parse_args()
 plugin = Path(args.plugin).resolve()
+libraries = dependencies(plugin)
 try:
     manifest_bytes = build_manifest(plugin / 'kiosk-satellite-plugin.json', args.version)
 except ValueError as error:
@@ -53,8 +56,10 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-') as temp:
     subprocess.run([java_tool('javac'), '--release', '8', '-cp', str(platform), '-d', str(sdk_classes), *map(str, sorted((ROOT / 'sdk/src').rglob('*.java')))], check=True)
     sdk_jar = out / 'kiosk-plugin-sdk-1.jar'
     subprocess.run([java_tool('jar'), 'cf', str(sdk_jar), '-C', str(sdk_classes), '.'], check=True)
-    subprocess.run([java_tool('javac'), '--release', '8', '-cp', os.pathsep.join([str(sdk_jar), str(platform)]), '-d', str(classes), *map(str, sorted((plugin / 'src').rglob('*.java')))], check=True)
-    subprocess.run([str(build_tools[-1]), '--min-api', str(manifest['minAndroidSdk']), '--lib', str(platform), '--classpath', str(sdk_jar), '--output', str(dex), *map(str, sorted(classes.rglob('*.class')))], check=True)
+    subprocess.run([java_tool('javac'), '--release', '8', '-cp', os.pathsep.join(map(str, [sdk_jar, platform, *libraries])), '-d', str(classes), *map(str, sorted((plugin / 'src').rglob('*.java')))], check=True)
+    isolated = temp / 'isolated.jar'
+    isolate(ROOT, java_tool('java'), sdk_root, platform, sdk_jar, classes, libraries, isolated)
+    subprocess.run([str(build_tools[-1]), '--min-api', str(manifest['minAndroidSdk']), '--lib', str(platform), '--classpath', str(sdk_jar), '--output', str(dex), str(isolated)], check=True)
     jar = temp / 'plugin.jar'
     def add(archive, name, data):
         info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
@@ -65,6 +70,9 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-') as temp:
         for file in sorted(dex.glob('*.dex')):
             add(archive, file.name, file.read_bytes())
     package = out / f"{manifest['id']}-{manifest['version']}.zip"
+    dex_size = sum(file.stat().st_size for file in dex.glob('*.dex'))
+    if dex_size > MAX_PACKAGE_BYTES:
+        raise SystemExit('Expanded DEX exceeds 4 MB')
     expanded = len(manifest_bytes) + jar.stat().st_size + (plugin / 'LICENSE').stat().st_size + sum(file.stat().st_size for _, file in assets)
     if expanded > MAX_PACKAGE_BYTES:
         raise SystemExit('Expanded plugin exceeds 4 MB')
