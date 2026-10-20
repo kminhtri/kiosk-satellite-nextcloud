@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Add personal Nextcloud Photos albums as a source, selectable alongside existing Files folders or on their own.
+- Read album membership with authenticated Depth 1 PROPFIND and download images directly from the album DAV endpoint.
+- Preserve existing folder configuration, deduplicate file IDs across folders and albums, and retain the 8 MiB image cap and visibility-based network suspension.
+- Limit selection to 32 folders/albums in total and 5000 unique photos per refresh; never recurse into albums or follow external/original-path download references.
+- Add WebDAV regressions for album-only and mixed sources, URL encoding, empty/missing albums, refreshes, deduplication and scope limits.
+
 ## 0.3.1
 
 - Use an authenticated Nextcloud preview by file ID when an original photo exceeds 8 MiB, without increasing the per-response memory cap.

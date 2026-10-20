@@ -23,7 +23,7 @@ You can also install it manually:
 
 ### Local ZIP installation and configuration
 
-1. Transfer `dist/nextcloud-photos-0.3.1.zip` to the kiosk, or use its remote admin interface.
+1. Transfer `dist/nextcloud-photos-0.4.0.zip` to the kiosk, or use its remote admin interface.
 2. Open **Settings → Plugin Manager**, enable plugins, then **Developer Tools → Install from ZIP**.
 3. Select the ZIP, review and trust it, then enable **Nextcloud Photo Frame**. A local ZIP cannot replace a plugin installed from GitHub. Switching to local testing requires uninstalling first, which deletes saved settings; record them before switching, or wait for the GitHub release update.
 4. Open the plugin's settings and enter:
@@ -104,7 +104,7 @@ python3 tools/check-sdk.py /path/to/kiosk-satellite
 
 ## Publish
 
-CI tests and packages changes. To distribute through Kiosk Satellite's GitHub installer, put this project in your own public repository, publish a stable tag such as `v0.3.1`, and let `.github/workflows/build.yml` attach the manifest, ZIP and checksum through GitHub Actions. Kiosk Satellite rejects manually uploaded release packages. Local ZIP installation is the supported developer testing route.
+CI tests and packages changes. To distribute through Kiosk Satellite's GitHub installer, put this project in your own public repository, publish a stable tag such as `v0.4.0`, and let `.github/workflows/build.yml` attach the manifest, ZIP and checksum through GitHub Actions. Kiosk Satellite rejects manually uploaded release packages. Local ZIP installation is the supported developer testing route.
 
 Based on the [official plugin template](https://github.com/jxlarrea/kiosk-satellite-plugins) at commit `2260f801f047dab06a1ca0c1c4f7bec926cb73b1`. The `sdk/` and `docs/` folders retain upstream SDK reference material. The plugin is named Nextcloud Photo Frame to distinguish it from Nextcloud’s own Photos app. Its technical ID remains `nextcloud-photos`, so existing settings, mode selections and schedules survive the rename. This project is independent of Nextcloud GmbH and Kiosk Satellite.
 
