@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from android_sdk import android_platform
+from android_sdk import android_platform, android_build_tools
 
 
 class AndroidPlatformTest(unittest.TestCase):
@@ -46,6 +46,23 @@ class AndroidPlatformTest(unittest.TestCase):
             android_platform(self.sdk)
         with self.assertRaisesRegex(ValueError, 'numeric version'):
             android_platform(self.sdk, '../35')
+
+    def install_tools(self, version):
+        path = self.sdk / 'build-tools' / version
+        (path / 'lib').mkdir(parents=True)
+        (path / 'lib/d8.jar').touch()
+        (path / 'd8').touch()
+        return path
+
+    def test_release_compilers_are_pinned_even_with_newer_preinstalls(self):
+        expected = self.install_tools('35.0.0')
+        self.install_tools('37.0.0')
+        self.assertEqual(android_build_tools(self.sdk), expected)
+
+    def test_missing_pinned_compiler_never_silently_falls_back(self):
+        self.install_tools('37.0.0')
+        with self.assertRaisesRegex(ValueError, 'Install Android build-tools 35.0.0'):
+            android_build_tools(self.sdk)
 
 
 if __name__ == '__main__':

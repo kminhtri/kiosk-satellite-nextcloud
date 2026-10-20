@@ -17,7 +17,7 @@ Requires Android 7.0+ and a current Kiosk Satellite version with SDK 1 custom sc
 
 ### Local ZIP installation and configuration
 
-1. Transfer `dist/nextcloud-photos-0.1.1.zip` to the kiosk, or use its remote admin interface.
+1. Transfer `dist/nextcloud-photos-0.1.2.zip` to the kiosk, or use its remote admin interface.
 2. Open **Settings → Plugin Manager**, enable plugins, then **Developer Tools → Install from ZIP**.
 3. Select the ZIP, review and trust it, then enable **Nextcloud Photos**.
 4. Open the plugin's settings and enter:
@@ -54,7 +54,7 @@ The renderer is isolated HTML containing an embedded image. It has no Nextcloud 
 
 ## Build and test
 
-Install Python 3, JDK 17+ and an Android SDK with platform 35 and build-tools 35.0.0. Set JAVA_HOME and ANDROID_HOME to those installations.
+Install Python 3, JDK 17+ and an Android SDK with platform 35 and build-tools 35.0.0. Set JAVA_HOME and ANDROID_HOME to those installations. The build and test scripts pin the tested platform and build-tools, even when newer versions are installed.
 
 ```sh
 python3 tools/test.py
@@ -84,7 +84,7 @@ python3 tools/check-sdk.py /path/to/kiosk-satellite
 
 ## Publish
 
-CI tests and packages changes. To distribute through Kiosk Satellite's GitHub installer, put this project in your own public repository, publish a stable tag such as `v0.1.1`, and let `.github/workflows/build.yml` attach the manifest, ZIP and checksum through GitHub Actions. Kiosk Satellite rejects manually uploaded release packages. Local ZIP installation is the supported developer testing route.
+CI tests and packages changes. To distribute through Kiosk Satellite's GitHub installer, put this project in your own public repository, publish a stable tag such as `v0.1.2`, and let `.github/workflows/build.yml` attach the manifest, ZIP and checksum through GitHub Actions. Kiosk Satellite rejects manually uploaded release packages. Local ZIP installation is the supported developer testing route.
 
 Based on the [official plugin template](https://github.com/jxlarrea/kiosk-satellite-plugins) at commit `2260f801f047dab06a1ca0c1c4f7bec926cb73b1`. The `sdk/` and `docs/` folders retain upstream SDK reference material. This project is independent of Nextcloud GmbH and Kiosk Satellite.
 

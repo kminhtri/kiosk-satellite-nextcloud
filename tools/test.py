@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from android_sdk import android_platform
+from android_sdk import android_platform, android_build_tools, DEFAULT_PLATFORM
 from dependencies import dependencies
 from isolate import isolate
 
@@ -19,7 +19,8 @@ def tool(name):
 # so the platform's stub classes are enough to compile and load them.
 sdk_root = Path(os.environ.get('ANDROID_HOME', os.environ.get('ANDROID_SDK_ROOT', str(Path.home() / 'android-sdk'))))
 try:
-    platform = str(android_platform(sdk_root))
+    platform = str(android_platform(sdk_root, DEFAULT_PLATFORM))
+    print(f'Android toolchain: platform {DEFAULT_PLATFORM}, build-tools {android_build_tools(sdk_root).name}', flush=True)
 except ValueError as error:
     raise SystemExit(str(error)) from error
 sources = [*sorted((root / 'src').rglob('*.java')), *sorted((root / 'tests/io').rglob('*.java'))]

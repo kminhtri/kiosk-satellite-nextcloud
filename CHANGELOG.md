@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Pin Android platform 35 and build-tools 35.0.0 for consistent local and GitHub Actions dependency isolation.
+- Fail with an installation hint when the tested compiler is missing instead of silently selecting a newer R8/D8.
+
 ## 0.1.1
 
 - Fix startup failures when the host includes an older Kotlin runtime.

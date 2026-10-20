@@ -2,6 +2,21 @@
 import re
 from pathlib import Path
 
+DEFAULT_PLATFORM = '35'
+BUILD_TOOLS_VERSION = '35.0.0'
+
+
+def android_build_tools(sdk_root, requested=BUILD_TOOLS_VERSION):
+    """Use the tested R8/D8 version even when a runner preinstalls newer tools."""
+    if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', requested):
+        raise ValueError('Android build-tools version must be numeric.')
+    directory = Path(sdk_root) / 'build-tools' / requested
+    if not (directory / 'lib/d8.jar').is_file() or not any(
+        (directory / name).is_file() for name in ('d8', 'd8.bat')
+    ):
+        raise ValueError(f'Install Android build-tools {requested} before building.')
+    return directory
+
 
 def android_platform(sdk_root, requested=None):
     platforms = Path(sdk_root) / 'platforms'

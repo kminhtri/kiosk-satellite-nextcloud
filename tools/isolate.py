@@ -2,14 +2,11 @@
 from pathlib import Path
 import subprocess
 import zipfile
+from android_sdk import android_build_tools
 
 
 def r8_jar(sdk_root):
-    jars = sorted((Path(sdk_root) / 'build-tools').glob('*/lib/d8.jar'),
-                  key=lambda p: tuple(int(v) for v in p.parent.parent.name.split('.') if v.isdigit()))
-    if not jars:
-        raise ValueError('Install Android build-tools to isolate the plugin runtime.')
-    return jars[-1]
+    return android_build_tools(sdk_root) / 'lib/d8.jar'
 
 
 def isolate(root, java, sdk_root, platform, sdk, classes, libraries, output):
