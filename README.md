@@ -1,6 +1,6 @@
 # Nextcloud Photos for Kiosk Satellite
 
-A Kiosk Satellite plugin that displays a Nextcloud **Files folder** as a photo screensaver. Nextcloud Photos/Memories virtual albums are not supported in this first version.
+A Kiosk Satellite plugin that displays Nextcloud **Files folders** as a photo screensaver. Nextcloud Photos/Memories virtual albums are not supported.
 
 ## Install
 
@@ -23,7 +23,7 @@ You can also install it manually:
 
 ### Local ZIP installation and configuration
 
-1. Transfer `dist/nextcloud-photos-0.1.2.zip` to the kiosk, or use its remote admin interface.
+1. Transfer `dist/nextcloud-photos-0.2.0.zip` to the kiosk, or use its remote admin interface.
 2. Open **Settings → Plugin Manager**, enable plugins, then **Developer Tools → Install from ZIP**.
 3. Select the ZIP, review and trust it, then enable **Nextcloud Photos**.
 4. Open the plugin's settings and enter:
@@ -31,6 +31,8 @@ You can also install it manually:
    - **Username**: the Nextcloud login name.
    - **App password**: generate one under Nextcloud personal settings → Security. A dedicated account with read access to your photo folder is recommended.
    - **Photo folder**: e.g. `Photos/Frame`, relative to that account's Files home.
+   - **Additional photo folders** (optional): add rows such as `Holidays/2026` or `Family`. All selected folders use the same connection and form one slideshow. Your existing **Photo folder** remains selected after upgrading.
+   - **Include subfolders** (optional): includes descendants of every selected folder. Leave it off to show only photos directly inside the selected folders.
 5. Open **Settings → Screensaver**, enable it, and select **Nextcloud Photos (Nextcloud Photos)** as the mode, or select it in a screensaver schedule.
 
 The plugin registers its mode immediately, including before connection settings are complete. Connection status appears on its settings page. An empty folder or initial connection failure also displays a message in the screensaver. After photos load, failures preserve the current photo.
@@ -40,7 +42,8 @@ If the mode is missing in Remote Admin after enabling the plugin, reload the who
 ## Features and limits
 
 - JPEG, PNG and WebP photos, with EXIF rotation/mirroring and black backgrounds for transparency.
-- Optional subfolders, limited to 100 directories and 5000 photos per listing. Choose a smaller folder if a limit is reached.
+- Up to 32 selected folders (one primary and 31 additional), with optional subfolders. The whole selection is limited to 100 directories, 20 levels below each selected folder and 5000 unique photos per refresh. Select fewer folders, select a deeper folder directly or disable subfolders if a limit is reached. A failed refresh keeps any previously loaded slideshow.
+- Overlapping folder paths are visited once. Nextcloud `oc:fileid` values also prevent repeated directory aliases and duplicate photos when available. Without IDs, path checks and traversal limits still stop unbounded recursion. Separate copies with different IDs remain separate photos.
 - Shuffle without repeats within a cycle, or Nextcloud's listing order with shuffle disabled.
 - Configurable 5–600 second interval, Fit/Fill scaling and periodic folder refresh.
 - Prefetches the next photo. Rotation pauses while the screensaver is inactive or the screen is off; directory refresh still runs periodically. The first two photos can preload while idle.
@@ -54,7 +57,9 @@ Images are resized to at most 1920 pixels on their longest side and compressed t
 
 Only the configured Nextcloud server receives requests, using PROPFIND and authenticated GET. No analytics, intermediary service or Home Assistant token is used. Credentials are stored through Kiosk Satellite's `secret` setting type and never embedded in screensaver HTML or diagnostic messages. This setting type does not establish a separate security boundary from trusted code in the host app.
 
-HTTPS certificate validation remains enabled. Redirects are refused; enter the final canonical server URL. HTTP is disabled unless **Allow unencrypted HTTP** is explicitly enabled; the Android host's cleartext-network policy must also permit it. Never put a password in the server URL. Returned image paths must stay within the selected folder and origin.
+HTTPS certificate validation remains enabled. Redirects are refused; enter the final canonical server URL. HTTP is disabled unless **Allow unencrypted HTTP** is explicitly enabled; the Android host's cleartext-network policy must also permit it. Never put a password in the server URL. Returned image paths must stay within the selected folders and origin.
+
+Select folders directly in the plugin rather than creating shortcuts. Only collections and images exposed by the standard Nextcloud Files WebDAV endpoint are read; URL shortcut files and virtual album links are not followed.
 
 The renderer is isolated HTML containing an embedded image. It has no Nextcloud credentials and makes no network requests. A Java worker fetches and processes images asynchronously and cancels requests on reconfiguration or shutdown. Each new image recreates the screensaver document under the current SDK, so slides use direct replacement without a crossfade.
 
@@ -72,7 +77,7 @@ Tools download pinned OkHttp, Okio, Kotlin standard library and annotations JARs
 
 The test runner first reproduces the `Intrinsics.checkNotNullParameter` failure with an incompatible host Kotlin fixture, then runs the isolated probe and full integration suite with that same host class first on the classpath. Package verification also checks the final DEX type references for dependency namespace leaks.
 
-Tests start a local HTTP WebDAV fixture and exercise authentication, folder traversal, URL/XML validation, redirects, bounded responses, rendering size limits, timing, cached offline rotation, screen-off behavior and cancellation of obsolete work. Image encoding is substituted in JVM tests; Android bitmap/EXIF decoding and the actual WebView require a device smoke test.
+Tests start a local HTTP WebDAV fixture and exercise authentication, multiple folders, overlapping selections, directory aliases and loops, traversal limits, URL/XML validation, redirects, bounded responses, rendering size limits, timing, cached offline rotation, screen-off behavior and cancellation of obsolete work. Image encoding is substituted in JVM tests; Android bitmap/EXIF decoding and the actual WebView require a device smoke test.
 
 To compare the bundled SDK with a Kiosk Satellite checkout:
 
@@ -87,10 +92,11 @@ python3 tools/check-sdk.py /path/to/kiosk-satellite
 3. Let several slides cache, disconnect networking, and verify that the current photo remains visible and cached slides rotate.
 4. Restore networking and run **Refresh photos**. Add/delete a photo and verify the next refresh updates the selection.
 5. Turn the screen off and wake it. Restart the plugin and reboot the kiosk; verify photos reload when Nextcloud is reachable.
+6. Add a second folder under **Additional photo folders** and verify both appear in the slideshow. Select an overlapping subfolder too, then enable **Include subfolders** and check that photos are not repeated within a cycle. Upgrade from 0.1.x and verify the original photo folder and credentials are retained.
 
 ## Publish
 
-CI tests and packages changes. To distribute through Kiosk Satellite's GitHub installer, put this project in your own public repository, publish a stable tag such as `v0.1.2`, and let `.github/workflows/build.yml` attach the manifest, ZIP and checksum through GitHub Actions. Kiosk Satellite rejects manually uploaded release packages. Local ZIP installation is the supported developer testing route.
+CI tests and packages changes. To distribute through Kiosk Satellite's GitHub installer, put this project in your own public repository, publish a stable tag such as `v0.2.0`, and let `.github/workflows/build.yml` attach the manifest, ZIP and checksum through GitHub Actions. Kiosk Satellite rejects manually uploaded release packages. Local ZIP installation is the supported developer testing route.
 
 Based on the [official plugin template](https://github.com/jxlarrea/kiosk-satellite-plugins) at commit `2260f801f047dab06a1ca0c1c4f7bec926cb73b1`. The `sdk/` and `docs/` folders retain upstream SDK reference material. This project is independent of Nextcloud GmbH and Kiosk Satellite.
 

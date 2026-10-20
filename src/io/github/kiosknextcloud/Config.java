@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package io.github.kiosknextcloud;
 
-import java.util.Map;
+import java.util.*;
 import okhttp3.HttpUrl;
 import okhttp3.Credentials;
 
 final class Config {
     final HttpUrl folder;
+    final List<HttpUrl> folders;
     final String authorization;
     final boolean recursive, shuffle, fill;
     final int seconds, refreshMinutes, cachePhotos;
@@ -27,13 +28,21 @@ final class Config {
         // Keep an installation subpath, removing only its trailing empty segment.
         if (base.pathSegments().get(base.pathSize() - 1).isEmpty()) url.removePathSegment(base.pathSize() - 1);
         url.addPathSegment("remote.php").addPathSegment("dav").addPathSegment("files").addPathSegment(username);
-        for (String part : text(values, "folder", "Photos").split("/")) {
-            if (part.isEmpty()) continue;
-            if (part.equals(".") || part.equals("..") || part.indexOf('\\') >= 0)
-                throw new IllegalArgumentException("The photo folder must not contain dot segments or backslashes.");
-            url.addPathSegment(part);
+        LinkedHashSet<HttpUrl> selected = new LinkedHashSet<>();
+        folder = folderUrl(url, text(values, "folder", "Photos"));
+        selected.add(folder);
+        Object additional = values.get("additionalFolders");
+        if (additional != null) {
+            if (!(additional instanceof List) || ((List<?>) additional).size() > 31)
+                throw new IllegalArgumentException("Select at most 31 additional photo folders.");
+            for (Object row : (List<?>) additional) {
+                Object path = row instanceof Map ? ((Map<?, ?>) row).get("path") : null;
+                if (!(path instanceof String) || ((String) path).trim().isEmpty())
+                    throw new IllegalArgumentException("Enter a path for each additional photo folder.");
+                selected.add(folderUrl(url, ((String) path).trim()));
+            }
         }
-        folder = url.addPathSegment("").build();
+        folders = Collections.unmodifiableList(new ArrayList<>(selected));
         authorization = Credentials.basic(username, password, java.nio.charset.StandardCharsets.UTF_8);
         recursive = Boolean.TRUE.equals(values.get("includeSubfolders"));
         shuffle = !Boolean.FALSE.equals(values.get("shuffle"));
@@ -41,6 +50,17 @@ final class Config {
         seconds = number(values, "secondsPerPhoto", 30, 5, 600);
         refreshMinutes = number(values, "refreshMinutes", 15, 1, 1440);
         cachePhotos = number(values, "cachePhotos", 12, 2, 30);
+    }
+
+    private static HttpUrl folderUrl(HttpUrl.Builder home, String path) {
+        HttpUrl.Builder url = home.build().newBuilder();
+        for (String part : path.split("/")) {
+            if (part.isEmpty()) continue;
+            if (part.equals(".") || part.equals("..") || part.indexOf('\\') >= 0)
+                throw new IllegalArgumentException("The photo folder must not contain dot segments or backslashes.");
+            url.addPathSegment(part);
+        }
+        return url.addPathSegment("").build();
     }
 
     static String text(Map<String, Object> values, String key, String fallback) {

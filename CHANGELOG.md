@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Combine the existing photo folder with up to 31 additional folders from the same Nextcloud account.
+- Preserve existing connection settings and apply optional subfolder traversal to every selected folder.
+- Deduplicate overlapping paths and Nextcloud file IDs; skip repeated folder IDs to prevent recursive alias loops.
+- Bound traversal to 20 levels below each selected folder, 100 folders and 5000 unique photos per refresh, including servers without file IDs.
+- Exercise multiple roots, overlapping selections, aliases, cycles and traversal limits through the WebDAV integration fixture.
+
 ## 0.1.2
 
 - Pin Android platform 35 and build-tools 35.0.0 for consistent local and GitHub Actions dependency isolation.

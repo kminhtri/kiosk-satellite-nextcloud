@@ -132,10 +132,10 @@ public final class NextcloudPlugin implements KioskPlugin {
                         cycle.clear(); cursor = 0;
                         refreshAt = now() + config.refreshMinutes * 60_000L;
                         networkRetryAt = 0;
-                        report(photos.isEmpty() ? "No JPEG, PNG or WebP photos found in this folder." : photos.size() + " photos available.", photos.isEmpty());
+                        report(photos.isEmpty() ? "No JPEG, PNG or WebP photos found in the selected folders." : photos.size() + " photos available.", photos.isEmpty());
                         if (photos.isEmpty()) {
                             current = null;
-                            publish(Renderer.message("No JPEG, PNG or WebP photos found in this folder."));
+                            publish(Renderer.message("No JPEG, PNG or WebP photos found in the selected folders."));
                         }
                     } catch (IOException error) {
                         refreshAt = now() + 30_000;

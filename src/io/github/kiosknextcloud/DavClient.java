@@ -10,24 +10,33 @@ import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 import okhttp3.*;
 
-/** All requests stay within the selected folder and never follow redirects with credentials. */
+/** All requests stay within selected folders and never follow redirects with credentials. */
 final class DavClient implements AutoCloseable {
     static final int MAX_XML = 4 * 1024 * 1024, MAX_IMAGE = 24 * 1024 * 1024;
-    static final String PROPERTIES = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop>"
-            + "<d:resourcetype/><d:getcontenttype/><d:getetag/></d:prop></d:propfind>";
+    static final int MAX_FOLDERS = 100, MAX_DEPTH = 20, MAX_PHOTOS = 5000;
+    static final String PROPERTIES = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop>"
+            + "<d:resourcetype/><d:getcontenttype/><d:getetag/><oc:fileid/></d:prop></d:propfind>";
     final Config config;
     private final OkHttpClient http;
 
     static final class Photo {
         final HttpUrl url;
-        final String etag;
-        Photo(HttpUrl url, String etag) { this.url = url; this.etag = etag; }
+        final String etag, id;
+        Photo(HttpUrl url, String etag, String id) { this.url = url; this.etag = etag; this.id = id; }
         String key() { return url.toString() + "\n" + etag; }
+    }
+
+    static final class Folder {
+        final HttpUrl url;
+        final String id;
+        final int depth;
+        Folder(HttpUrl url, String id, int depth) { this.url = url; this.id = id; this.depth = depth; }
     }
 
     static final class Listing {
         final List<Photo> photos = new ArrayList<>();
-        final List<HttpUrl> folders = new ArrayList<>();
+        final List<Folder> folders = new ArrayList<>();
+        String directoryId = "";
     }
 
     DavClient(Config config) {
@@ -38,33 +47,52 @@ final class DavClient implements AutoCloseable {
     }
 
     List<Photo> list() throws IOException {
-        LinkedHashMap<String, Photo> result = new LinkedHashMap<>();
-        ArrayDeque<HttpUrl> pending = new ArrayDeque<>();
-        Set<String> visited = new HashSet<>();
-        pending.add(config.folder);
+        List<Photo> result = new ArrayList<>();
+        ArrayDeque<Folder> pending = new ArrayDeque<>();
+        Set<String> scheduledUrls = new HashSet<>(), scheduledIds = new HashSet<>(), visitedIds = new HashSet<>();
+        Set<String> photoUrls = new HashSet<>(), photoIds = new HashSet<>();
+        for (HttpUrl root : config.folders) {
+            if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0));
+        }
         while (!pending.isEmpty()) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
-            HttpUrl directory = pending.remove();
-            if (!visited.add(directory.toString())) continue;
-            if (visited.size() > 100) throw new IOException("Folder limit reached (100); choose a smaller folder.");
+            Folder current = pending.remove();
+            if (!current.id.isEmpty() && visitedIds.contains(current.id)) continue;
+            HttpUrl directory = current.url;
             Request request = request(directory).header("Depth", "1")
                     .method("PROPFIND", RequestBody.create(MediaType.parse("application/xml; charset=utf-8"), PROPERTIES)).build();
             Listing listing;
             try (Response response = http.newCall(request).execute()) {
                 require(response, 207);
-                listing = parse(read(response.body(), MAX_XML), directory, config.folder);
+                listing = parse(read(response.body(), MAX_XML), directory, directory);
             }
+            String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
+            if (!id.isEmpty() && !visitedIds.add(id)) continue;
             for (Photo photo : listing.photos) {
-                result.put(photo.url.toString(), photo);
-                if (result.size() > 5000) throw new IOException("Photo limit reached (5000); choose a smaller folder.");
+                if (!photoUrls.add(pathKey(photo.url))) continue;
+                if (!photo.id.isEmpty() && !photoIds.add(photo.id)) continue;
+                result.add(photo);
+                if (result.size() > MAX_PHOTOS) throw new IOException("Photo limit reached (5000); choose fewer folders.");
             }
-            if (config.recursive) pending.addAll(listing.folders);
+            if (config.recursive) for (Folder child : listing.folders) {
+                if (scheduledUrls.contains(pathKey(child.url))) continue;
+                if (!child.id.isEmpty() && (visitedIds.contains(child.id) || scheduledIds.contains(child.id))) continue;
+                if (current.depth >= MAX_DEPTH)
+                    throw new IOException("Subfolder depth limit reached (20); select the deeper folder directly or disable subfolders.");
+                if (scheduledUrls.size() >= MAX_FOLDERS)
+                    throw new IOException("Folder limit reached (100); choose fewer folders or disable subfolders.");
+                scheduledUrls.add(pathKey(child.url));
+                if (!child.id.isEmpty()) scheduledIds.add(child.id);
+                pending.add(new Folder(child.url, child.id, current.depth + 1));
+            }
         }
-        return new ArrayList<>(result.values());
+        return result;
     }
 
     byte[] download(Photo photo) throws IOException {
-        if (!within(photo.url, config.folder)) throw new IOException("Photo address is outside the configured folder.");
+        boolean allowed = false;
+        for (HttpUrl root : config.folders) allowed |= within(photo.url, root);
+        if (!allowed) throw new IOException("Photo address is outside the configured folders.");
         try (Response response = http.newCall(request(photo.url).get().build()).execute()) {
             require(response, 200);
             return read(response.body(), MAX_IMAGE);
@@ -124,9 +152,11 @@ final class DavClient implements AutoCloseable {
             for (int i = 0; i < responses.getLength(); i++) {
                 Element response = (Element) responses.item(i);
                 HttpUrl url = directory.resolve(value(response, "href"));
-                if (url == null || !within(url, root) || !directChild(url, directory)) continue;
+                if (url == null || !within(url, root)) continue;
+                boolean self = descendant(url, directory) && pathLength(url) == pathLength(directory);
+                if (!self && !directChild(url, directory)) continue;
                 NodeList propstats = response.getElementsByTagNameNS("DAV:", "propstat");
-                String type = "", etag = "";
+                String type = "", etag = "", id = "";
                 boolean collection = false, success = false;
                 for (int j = 0; j < propstats.getLength(); j++) {
                     Element propstat = (Element) propstats.item(j);
@@ -136,14 +166,20 @@ final class DavClient implements AutoCloseable {
                     if (!candidate.isEmpty()) type = candidate.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
                     candidate = value(propstat, "getetag");
                     if (!candidate.isEmpty()) etag = candidate;
+                    NodeList ids = propstat.getElementsByTagNameNS("http://owncloud.org/ns", "fileid");
+                    if (ids.getLength() > 0) id = ids.item(0).getTextContent().trim();
                     collection |= propstat.getElementsByTagNameNS("DAV:", "collection").getLength() > 0;
                 }
                 if (!success) continue;
+                if (self) {
+                    if (collection) result.directoryId = id;
+                    continue;
+                }
                 if (collection) {
                     if (!url.encodedPath().endsWith("/")) url = url.newBuilder().addPathSegment("").build();
-                    result.folders.add(url);
+                    result.folders.add(new Folder(url, id, 0));
                 } else if (Arrays.asList("image/jpeg", "image/png", "image/webp").contains(type)) {
-                    result.photos.add(new Photo(url, etag));
+                    result.photos.add(new Photo(url, etag, id));
                 }
             }
             return result;
@@ -177,6 +213,14 @@ final class DavClient implements AutoCloseable {
     private static int pathLength(HttpUrl url) {
         int length = url.pathSize();
         return length > 0 && url.pathSegments().get(length - 1).isEmpty() ? length - 1 : length;
+    }
+
+    private static String pathKey(HttpUrl url) {
+        // Paths have already passed within(): decoded segments contain no slash.
+        // This also treats equivalent percent encodings and trailing slashes alike.
+        StringBuilder key = new StringBuilder();
+        for (int i = 0; i < pathLength(url); i++) key.append('/').append(url.pathSegments().get(i));
+        return key.toString();
     }
 
     private static boolean descendant(HttpUrl url, HttpUrl directory) {

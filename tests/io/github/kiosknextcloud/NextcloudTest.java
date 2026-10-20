@@ -20,6 +20,7 @@ public final class NextcloudTest {
     public static void main(String[] args) throws Exception {
         configAndXml();
         rendererBudget();
+        multipleFolders();
         try (Fixture fixture = new Fixture()) {
             webdav(fixture);
             slideshow(fixture);
@@ -58,6 +59,19 @@ public final class NextcloudTest {
         expectFailure(() -> new Config(settings), "HTTP requires explicit opt-in");
         settings.put("serverUrl", "https://alice:password@cloud.example");
         expectFailure(() -> new Config(settings), "reject embedded credentials");
+        Map<String, Object> multiSettings = settings("https://cloud.example");
+        multiSettings.put("additionalFolders", Arrays.asList(Collections.singletonMap("path", "/Photos/"),
+                Collections.singletonMap("path", "Holidays/été")));
+        Config multi = new Config(multiSettings);
+        check(multi.folders.size() == 2 && multi.folder.equals(multi.folders.get(0)), "keep legacy folder and remove duplicate roots");
+        check(multi.folders.get(1).encodedPath().endsWith("/Holidays/%C3%A9t%C3%A9/"), "encode additional folder paths");
+        final Map<String, Object> invalid = new HashMap<>(multiSettings);
+        invalid.put("additionalFolders", Collections.singletonList(Collections.singletonMap("path", "Photos/../private")));
+        expectFailure(() -> new Config(invalid), "reject traversal in additional folder");
+        invalid.put("additionalFolders", Collections.singletonList(Collections.singletonMap("path", " ")));
+        expectFailure(() -> new Config(invalid), "blank additional folder must not select whole account");
+        invalid.put("additionalFolders", Collections.nCopies(32, Collections.singletonMap("path", "Photos")));
+        expectFailure(() -> new Config(invalid), "bound configured folder count");
 
         HttpUrl root = HttpUrl.get("https://cloud.example/remote.php/dav/files/alice/Photos/");
         String path = root.encodedPath();
@@ -90,6 +104,91 @@ public final class NextcloudTest {
         check(Renderer.photo(new byte[1], false).contains("object-fit:contain"), "Fit uses contain");
         check(!Renderer.message("<script>\"&").contains("<script>"), "escape status HTML");
         expectFailure(() -> Renderer.photo(new byte[AndroidImageEncoder.MAX_JPEG + 1], false), "reject oversized image");
+    }
+
+    static void multipleFolders() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            Map<String, Object> values = settings(fixture.url());
+            values.put("additionalFolders", Collections.singletonList(Collections.singletonMap("path", "Photos/sub")));
+            try (DavClient client = new DavClient(new Config(values))) {
+                check(client.list().size() == 4, "explicit child folder works with recursion disabled");
+            }
+            fixture.propfinds.set(0);
+            values.put("includeSubfolders", true);
+            try (DavClient client = new DavClient(new Config(values))) {
+                check(client.list().size() == 4 && fixture.propfinds.get() == 2, "overlapping roots visited only once without file IDs");
+            }
+
+            String root = fixture.root, holidays = root.replace("Photos/", "Holidays/");
+            fixture.directoryListing = path -> {
+                if (path.equals(root)) return listing(entry(root, true, "", "", "root")
+                        + entry(root + "a.jpg", false, "image/jpeg", "v1", "photo-a")
+                        + entry(root + "sub/", true, "", "", "sub")
+                        + entry(root + "loop/", true, "", "", "root")
+                        + entry(root + "sub-alias/", true, "", "", "sub"));
+                if (path.equals(holidays)) return listing(entry(path, true, "", "", "holidays")
+                        + entry(path + "copy.jpg", false, "image/jpeg", "v1", "photo-a")
+                        + entry(path + "b.jpg", false, "image/jpeg", "v2", "photo-b"));
+                if (path.equals(root + "sub/")) return listing(entry(path, true, "", "", "sub")
+                        + entry(path + "c.jpg", false, "image/jpeg", "v3", "photo-c")
+                        + entry(path + "back/", true, "", "", "root"));
+                throw new AssertionError("Followed a cycle or duplicate alias: " + path);
+            };
+            values.put("additionalFolders", Collections.singletonList(Collections.singletonMap("path", "Holidays")));
+            fixture.propfinds.set(0);
+            try (DavClient client = new DavClient(new Config(values))) {
+                List<DavClient.Photo> photos = client.list();
+                check(photos.size() == 3 && fixture.propfinds.get() == 3, "file IDs prevent ancestor loops, queued aliases and duplicate photos");
+                DavClient.Photo holiday = photos.stream().filter(photo -> photo.url.encodedPath().contains("Holidays")).findFirst().get();
+                check(client.download(holiday).length > 0, "download photos from additional root");
+                int gets = fixture.gets.get();
+                expectFailure(() -> client.download(new DavClient.Photo(HttpUrl.get(fixture.url() + "/private.jpg"), "", "")), "reject downloads outside all selected roots");
+                check(fixture.gets.get() == gets, "outside-root download rejected before request");
+            }
+            values.put("includeSubfolders", false);
+            fixture.propfinds.set(0);
+            try (DavClient client = new DavClient(new Config(values))) {
+                check(client.list().size() == 2 && fixture.propfinds.get() == 2, "all roots listed without recursion, with shared photo deduplication");
+            }
+
+            // A separately configured alias has no ID until its self entry is read.
+            fixture.directoryListing = path -> listing(entry(path, true, "", "", "same-root")
+                    + entry(path + "x.jpg", false, "image/jpeg", "v1", path.equals(root) ? "first" : "must-skip"));
+            try (DavClient client = new DavClient(new Config(values))) {
+                check(client.list().size() == 1, "self IDs deduplicate separately configured root aliases");
+            }
+
+            values.remove("additionalFolders");
+            values.put("includeSubfolders", true);
+            fixture.directoryListing = path -> listing(entry(path, true, "", "") + entry(path + "loop/", true, "", ""));
+            fixture.propfinds.set(0);
+            try (DavClient client = new DavClient(new Config(values))) {
+                expectLimit(client, "depth limit");
+                check(fixture.propfinds.get() == DavClient.MAX_DEPTH + 1, "stop growing alias paths even without file IDs");
+            }
+            fixture.directoryListing = path -> {
+                StringBuilder children = new StringBuilder();
+                for (int i = 0; i < DavClient.MAX_FOLDERS; i++) children.append(entry(path + "child" + i + "/", true, "", ""));
+                return listing(children.toString());
+            };
+            fixture.propfinds.set(0);
+            try (DavClient client = new DavClient(new Config(values))) {
+                expectLimit(client, "Folder limit");
+                check(fixture.propfinds.get() == 1, "bound pending traversal as well as completed directory requests");
+            }
+            fixture.directoryListing = path -> {
+                StringBuilder photos = new StringBuilder();
+                for (int i = 0; i <= DavClient.MAX_PHOTOS; i++) photos.append(entry(path + i + ".jpg", false, "image/jpeg", ""));
+                return listing(photos.toString());
+            };
+            try (DavClient client = new DavClient(new Config(values))) { expectLimit(client, "Photo limit"); }
+            check(fixture.badAuth.get() == 0 && fixture.badDepth.get() == 0, "multiple roots preserve authenticated Depth 1 requests");
+        }
+    }
+
+    static void expectLimit(DavClient client, String message) throws Exception {
+        try { client.list(); throw new AssertionError("Missing traversal limit: " + message); }
+        catch (IOException expected) { check(expected.getMessage().contains(message), "specific traversal limit: " + expected.getMessage()); }
     }
 
     static void webdav(Fixture fixture) throws Exception {
@@ -191,12 +290,17 @@ public final class NextcloudTest {
     }
 
     static String entry(String href, boolean folder, String type, String etag) {
-        return "<d:response><d:href>" + href.replace("&", "&amp;") + "</d:href><d:propstat><d:prop><d:resourcetype>"
-                + (folder ? "<d:collection/>" : "") + "</d:resourcetype><d:getcontenttype>" + type
-                + "</d:getcontenttype><d:getetag>" + etag + "</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>";
+        return entry(href, folder, type, etag, "");
     }
 
-    static String listing(String entries) { return "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\">" + entries + "</d:multistatus>"; }
+    static String entry(String href, boolean folder, String type, String etag, String id) {
+        return "<d:response><d:href>" + href.replace("&", "&amp;") + "</d:href><d:propstat><d:prop><d:resourcetype>"
+                + (folder ? "<d:collection/>" : "") + "</d:resourcetype><d:getcontenttype>" + type
+                + "</d:getcontenttype><d:getetag>" + etag + "</d:getetag><oc:fileid>" + id
+                + "</oc:fileid></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>";
+    }
+
+    static String listing(String entries) { return "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\">" + entries + "</d:multistatus>"; }
 
     static final class Host implements PluginHost {
         final AtomicInteger images = new AtomicInteger(), publishes = new AtomicInteger();
@@ -218,6 +322,8 @@ public final class NextcloudTest {
     static final class Fixture implements AutoCloseable {
         final HttpServer server;
         final AtomicInteger gets = new AtomicInteger(), badAuth = new AtomicInteger(), badDepth = new AtomicInteger(), redirectHits = new AtomicInteger();
+        final AtomicInteger propfinds = new AtomicInteger();
+        volatile java.util.function.Function<String, String> directoryListing;
         volatile int mode;
         volatile boolean failImages;
         volatile CountDownLatch block, entered;
@@ -244,8 +350,9 @@ public final class NextcloudTest {
                 }
                 String path = exchange.getRequestURI().getPath();
                 if (exchange.getRequestMethod().equals("PROPFIND")) {
+                    propfinds.incrementAndGet();
                     if (!"1".equals(exchange.getRequestHeaders().getFirst("Depth"))) badDepth.incrementAndGet();
-                    String xml = path.equals(root) ? listing(entry(root, true, "", "") + entry(root + "a.jpg", false, "image/jpeg", "a1")
+                    String xml = directoryListing != null ? directoryListing.apply(path) : path.equals(root) ? listing(entry(root, true, "", "") + entry(root + "a.jpg", false, "image/jpeg", "a1")
                             + entry(root + "b.png", false, "image/png", "b1") + entry(root + "c.webp", false, "image/webp", "c1")
                             + entry(root + "sub/", true, "", ""))
                             : listing(entry(root + "sub/", true, "", "") + entry(root + "sub/d.jpg", false, "image/jpeg", "d1"));

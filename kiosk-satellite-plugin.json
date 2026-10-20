@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "nextcloud-photos",
   "name": "Nextcloud Photos",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "apiVersion": 1,
   "minAndroidSdk": 24,
   "entryClass": "io.github.kiosknextcloud.NextcloudPlugin",
-  "description": "Photo screensaver from a Nextcloud WebDAV folder, with shuffle and a bounded in-memory offline cache.",
+  "description": "Photo screensaver from Nextcloud WebDAV folders, with shuffle and a bounded in-memory offline cache.",
   "author": "kminhtri",
   "license": "Apache-2.0",
   "capabilities": [
@@ -47,12 +47,32 @@
       "description": "Folder relative to your Nextcloud Files home. This is a folder, not a virtual Photos album."
     },
     {
+      "key": "additionalFolders",
+      "type": "list",
+      "title": "Additional photo folders",
+      "group": "Connection",
+      "description": "Add other folders from the same account. Photos from all selected folders form one slideshow; duplicates are skipped.",
+      "addTitle": "Add photo folder",
+      "maxItems": 31,
+      "row": { "title": "path" },
+      "default": [],
+      "fields": [
+        {
+          "key": "path",
+          "type": "string",
+          "title": "Folder path",
+          "description": "Relative to your Nextcloud Files home, for example Holidays/2026.",
+          "required": true
+        }
+      ]
+    },
+    {
       "key": "includeSubfolders",
       "type": "boolean",
       "title": "Include subfolders",
       "default": false,
       "group": "Connection",
-      "description": "Recursively list folders, up to 100 folders and 5000 photos."
+      "description": "Applies to all selected folders. Up to 20 levels, 100 folders and 5000 unique photos in total, with loop detection."
     },
     {
       "key": "secondsPerPhoto",
