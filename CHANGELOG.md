@@ -3,6 +3,7 @@
 ## 0.4.0
 
 - Add personal Nextcloud Photos albums as a source, selectable alongside existing Files folders or on their own.
+- Allow switching to an album source before adding the first album; validate the required selection in the plugin instead of blocking the settings editor.
 - Read album membership with authenticated Depth 1 PROPFIND and download images directly from the album DAV endpoint.
 - Preserve existing folder configuration, deduplicate file IDs across folders and albums, and retain the 8 MiB image cap and visibility-based network suspension.
 - Limit selection to 32 folders/albums in total and 5000 unique photos per refresh; never recurse into albums or follow external/original-path download references.
