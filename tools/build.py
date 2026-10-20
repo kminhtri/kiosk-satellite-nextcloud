@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-') as temp:
     build_info = write_build_info(temp / 'generated', manifest_bytes)
     subprocess.run([java_tool('javac'), '--release', '8', '-cp', os.pathsep.join(map(str, [sdk_jar, platform, *libraries])), '-d', str(classes), str(build_info), *map(str, sorted((plugin / 'src').rglob('*.java')))], check=True)
     isolated = temp / 'isolated.jar'
-    isolate(ROOT, java_tool('java'), sdk_root, platform, sdk_jar, classes, libraries, isolated)
+    isolate(ROOT, java_tool('java'), sdk_root, platform, sdk_jar, classes, libraries, isolated, out / 'mapping.txt')
     subprocess.run([str(d8), '--min-api', str(manifest['minAndroidSdk']), '--lib', str(platform), '--classpath', str(sdk_jar), '--output', str(dex), str(isolated)], check=True)
     jar = temp / 'plugin.jar'
     def add(archive, name, data):
@@ -88,4 +88,4 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-') as temp:
     digest = hashlib.sha256(package.read_bytes()).hexdigest()
     package.with_suffix('.zip.sha256').write_text(f'{digest}  {package.name}\n')
     (out / 'kiosk-satellite-plugin.json').write_bytes(manifest_bytes)
-    print(f'Package: {package}\nSHA-256: {digest}\nSDK: {sdk_jar}')
+    print(f'Package: {package}\nSHA-256: {digest}\nR8 mapping: {out / "mapping.txt"}\nSDK: {sdk_jar}')

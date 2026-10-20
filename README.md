@@ -79,6 +79,8 @@ Tools download pinned OkHttp, Okio, Kotlin standard library and annotations JARs
 
 The test runner first reproduces the `Intrinsics.checkNotNullParameter` failure with an incompatible host Kotlin fixture, then runs the isolated probe and full integration suite with that same host class first on the classpath. Package verification also checks the final DEX type references for dependency namespace leaks.
 
+Every build writes R8’s class and member renaming map to `dist/mapping.txt`. CI keeps it with the build artifact, and the release workflow attaches it alongside the ZIP, manifest and checksum. Reviewers can trace private class names back to the pinned OkHttp, Okio and Kotlin inputs in `tools/dependencies.lock.json`. The map is produced by the same R8 invocation as the packaged code; it is not embedded in the plugin ZIP.
+
 Tests start a local HTTP WebDAV fixture and exercise authentication, multiple folders, overlapping selections, directory aliases and loops, traversal limits, URL/XML validation, redirects, bounded responses, rendering size limits, timing, cached offline rotation, zero idle traffic, mode-switch cancellation, the 8 MiB download limit, versioned User-Agent, simulated out-of-memory recovery and cancellation of obsolete work. Image encoding is substituted in JVM tests; Android bitmap/EXIF decoding and the actual WebView require a device smoke test.
 
 To compare the bundled SDK with a Kiosk Satellite checkout:

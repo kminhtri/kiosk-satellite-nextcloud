@@ -22,4 +22,5 @@ jobs:
           path: |
             dist/*.zip
             dist/*.zip.sha256
+            dist/mapping.txt
             dist/kiosk-satellite-plugin.json

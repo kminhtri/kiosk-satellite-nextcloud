@@ -42,4 +42,5 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             dist/*.zip \
             dist/*.zip.sha256 \
+            dist/mapping.txt \
             dist/kiosk-satellite-plugin.json --clobber
