@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0
+
+- Add an optional night mode with a switch, ambient-light threshold and continuous-darkness delay, defaulting to off, 5 lx and 2 minutes.
+- Use Kiosk Satellite's light-sensor events and screen controls, with a countdown independent of photo downloads and no countdown while another view is active.
+- Wake a display powered off by this plugin's night mode when daylight returns, or when night mode is disabled, while respecting manual power-off.
+- Match the native Clock's light hysteresis: enter at or below the threshold and exit above 125% of it (5 lx / 6.25 lx).
+- Guard against stale sensor reads and late screen-off callbacks, suspend night screen-off without live readings, and avoid repeated permission failures in one viewing period.
+- Use matching Photo folders and Photo albums lists, with Add folder and Add album actions, and move source settings into a Photo sources group.
+- Import the primary folder and additional folders into the unified list without changing credentials, albums or night settings; retain legacy values for compatibility.
+- Add deterministic timing, lifecycle, daylight wake, manual power-off, hysteresis, blocked-download and folder migration regression coverage.
+
 ## 0.4.0
 
 - Add personal Nextcloud Photos albums as a source, selectable alongside existing Files folders or on their own.

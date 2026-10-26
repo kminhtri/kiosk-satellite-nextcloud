@@ -23,7 +23,7 @@ You can also install it manually:
 
 ### Local ZIP installation and configuration
 
-1. Transfer `dist/nextcloud-photos-0.4.0.zip` to the kiosk, or use its remote admin interface.
+1. Transfer `dist/nextcloud-photos-0.5.0.zip` to the kiosk, or use its remote admin interface.
 2. Open **Settings → Plugin Manager**, enable plugins, then **Developer Tools → Install from ZIP**.
 3. Select the ZIP, review and trust it, then enable **Nextcloud Photo Frame**. A local ZIP cannot replace a plugin installed from GitHub. Switching to local testing requires uninstalling first, which deletes saved settings; record them before switching, or wait for the GitHub release update.
 4. Open the plugin's settings and enter:
@@ -31,10 +31,9 @@ You can also install it manually:
    - **Username**: the Nextcloud login name.
    - **App password**: generate one under Nextcloud personal settings → Security. A dedicated account with read access to your photo folder is recommended.
    - **Photo source**: choose **Folders** (the default), **Albums**, or **Folders and albums**. Existing installations keep their folder selection.
-   - **Photo folder**: e.g. `Photos/Frame`, relative to that account's Files home.
-   - **Additional photo folders** (optional): add rows such as `Holidays/2026` or `Family`. All selected folders use the same connection and form one slideshow. Your existing **Photo folder** remains selected after upgrading.
+   - **Photo folders**: use **Add folder** for paths such as `Photos/Frame`, `Holidays/2026` or `Family`, relative to that account's Files home. Use `/` for Files home itself. Existing primary and additional folders are imported automatically into this list; all selected folders form one slideshow.
    - **Include subfolders** (optional): includes descendants of every selected Files folder. It never traverses albums recursively.
-   - **Nextcloud Photos albums**: when using albums, add each personal album’s exact name, for example `Holidays 2026`. Use the name shown in Nextcloud Photos, not a URL or filesystem path. Album names are case-sensitive. Select at most 32 folders and albums in total.
+   - **Photo albums**: use **Add album** for each personal album’s exact name, for example `Holidays 2026`. Use the name shown in Nextcloud Photos, not a URL or filesystem path. Album names are case-sensitive. The folder and album lists use the same editing controls. Select at most 32 folders and albums in total.
 5. Open **Settings → Screensaver**, enable it, and select **Nextcloud Photo Frame (Nextcloud Photo Frame)** as the mode, or select it in a screensaver schedule.
 
 The plugin registers its mode immediately, including before connection settings are complete. Network work starts only when **Nextcloud Photo Frame** is the visible screensaver and the screen is on. An empty folder or initial connection failure displays a message there; after photos load, failures preserve the current photo.
@@ -46,7 +45,7 @@ If the mode is missing in Remote Admin after enabling the plugin, reload the who
 ## Features and limits
 
 - JPEG, PNG and WebP photos, with EXIF rotation/mirroring and black backgrounds for transparency.
-- Up to 32 selected sources in total: Files folders (one primary and up to 31 additional) and/or personal Photos albums. The whole selection is limited to 100 collections, 20 levels below each selected Files folder and 5000 unique photos per refresh. Select fewer folders, select a deeper folder directly or disable subfolders if a limit is reached. A failed refresh keeps any previously loaded slideshow.
+- Up to 32 selected sources in total: Files folders and/or personal Photos albums. The whole selection is limited to 100 collections, 20 levels below each selected Files folder and 5000 unique photos per refresh. Select fewer folders, select a deeper folder directly or disable subfolders if a limit is reached. A failed refresh keeps any previously loaded slideshow.
 - Personal Photos albums are read directly through their authenticated album WebDAV endpoint. Album membership is refreshed automatically at the configured interval or with **Refresh photos**; photos stay in their original folders. Public links and albums shared with this account are not supported in this version.
 - Overlapping folder paths are visited once. Nextcloud `oc:fileid` values also prevent repeated directory aliases and duplicate photos across folders and albums when available. Without IDs, path checks and traversal limits still stop unbounded recursion. Separate copies with different IDs remain separate photos.
 - Shuffle without repeats within a cycle, or Nextcloud's listing order with shuffle disabled.
@@ -55,12 +54,15 @@ If the mode is missing in Remote Admin after enabling the plugin, reload the who
 - Bounded in-memory cache of 2–30 resized photos. During connection failures, available cached photos continue rotating. **The cache clears when settings change, the plugin stops, or the app restarts.** It is not a persistent offline photo library.
 - **Refresh photos** and **Next photo** plugin actions, assignable through Kiosk Satellite gestures, drawer shortcuts or Home Assistant buttons.
 - Kiosk Satellite retains its standard idle timeout, brightness, wake triggers, touch dismissal, widgets and schedules. Stock slideshow edge-tap navigation and transitions do not control this plugin.
+- Optional **Night mode** powers off the display after continuous darkness while this photo frame is visible, then wakes it when daylight returns. Defaults: off, 5 lx and 2 minutes. It follows the native Clock's 25% hysteresis: enter at or below 5 lx and exit above 6.25 lx. It requires a live ambient-light sensor and an existing Kiosk Satellite screen-off permission. It restores only a display powered off by its own night mode. Manual wake grants a new full delay. See the [night mode guide](docs/night-mode.md).
 
 Images are resized to at most 1920 pixels on their longest side and compressed to at most 350 KiB. Downloads are limited to 8 MiB per response, including responses without Content-Length. If an original exceeds that limit, the plugin requests a 1920 × 1920 aspect-preserving preview from the same Nextcloud server using the selected photo's `oc:fileid`. The preview has the same 8 MiB cap. Nextcloud image previews must be enabled and the file ID must be available; otherwise use a smaller JPEG/PNG/WebP copy. Folder and album listings have a separate 4 MiB XML limit. A caught OutOfMemoryError clears the resized-photo cache and backs off for 30 seconds without terminating the scheduled slideshow; recovery is best effort in the host process. HEIC, GIF, RAW, videos, public-share authentication, shared albums and Memories-specific collections are outside this release's scope. Export those photos to JPEG/PNG/WebP in the selected folder.
 
 ## Privacy and connections
 
 Only the configured Nextcloud server receives requests, using PROPFIND and authenticated GET. No analytics, intermediary service or Home Assistant token is used. Credentials are stored through Kiosk Satellite's `secret` setting type and never embedded in screensaver HTML or diagnostic messages. This setting type does not establish a separate security boundary from trusted code in the host app.
+
+Night mode uses Kiosk Satellite's own ambient-light readings and screen controls. The `host.control` capability allows display power-off and waking; the feature is disabled by default. It does not request Android permissions or change the app's native Clock screensaver settings.
 
 HTTPS certificate validation remains enabled. Redirects are refused; enter the final canonical server URL. HTTP is disabled unless **Allow unencrypted HTTP** is explicitly enabled; the Android host's cleartext-network policy must also permit it. Never put a password in the server URL. Returned image paths must stay within the selected Files folders or be direct entries of a selected Photos album, on the configured origin. The oversized-photo fallback uses only the configured server's `/index.php/core/preview` endpoint, with a numeric file ID from the selected DAV entry; server-supplied preview URLs are never followed.
 
@@ -100,7 +102,7 @@ python3 tools/check-sdk.py /path/to/kiosk-satellite
 4. Restore networking and run **Refresh photos**. Add/delete a photo and verify the next refresh updates the selection.
 5. Switch to Clock or dismiss the screensaver and verify that Nextcloud requests stop, including retries after a connection failure. Turn the screen off and wake it, then activate this mode again. Restart the plugin and reboot the kiosk; verify photos reload when this screensaver becomes visible and Nextcloud is reachable.
 6. Choose **Albums**, add a personal album name and activate the screensaver. Add/remove a photo in Nextcloud Photos and run **Refresh photos** while the frame is visible. Select **Folders and albums** and verify a photo present in both appears only once per cycle when Nextcloud provides its file ID.
-7. Add a second folder under **Additional photo folders** and verify both appear in the slideshow. Select an overlapping subfolder too, then enable **Include subfolders** and check that photos are not repeated within a cycle. Upgrade from 0.1.x and verify the original photo folder and credentials are retained.
+7. Use **Add folder** under **Photo folders** and verify both folders appear in the slideshow. Select an overlapping subfolder too, then enable **Include subfolders** and check that photos are not repeated within a cycle. Upgrade from an older version and verify primary and additional folders appear in the same list, while credentials and album selections are retained. Remove the old primary folder and verify it stays removed after restarting.
 
 ## Publish
 
