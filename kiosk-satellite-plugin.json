@@ -11,7 +11,8 @@
   "license": "Apache-2.0",
   "capabilities": [
     "screensaver",
-    "host.read"
+    "host.read",
+    "host.control"
   ],
   "settings": [
     {
@@ -45,7 +46,11 @@
       "default": "Folders",
       "group": "Connection",
       "description": "Read Files folders, personal albums from the Nextcloud Photos app, or combine both in one slideshow.",
-      "options": ["Folders", "Albums", "Folders and albums"]
+      "options": [
+        "Folders",
+        "Albums",
+        "Folders and albums"
+      ]
     },
     {
       "key": "folder",
@@ -54,7 +59,10 @@
       "default": "Photos",
       "group": "Connection",
       "description": "Folder relative to your Nextcloud Files home. For a Photos album, change Photo source instead.",
-      "visibleWhen": { "key": "photoSource", "notEquals": "Albums" }
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": "Albums"
+      }
     },
     {
       "key": "additionalFolders",
@@ -64,9 +72,14 @@
       "description": "Add other folders from the same account. Photos from all selected folders form one slideshow; duplicates are skipped.",
       "addTitle": "Add photo folder",
       "maxItems": 31,
-      "row": { "title": "path" },
+      "row": {
+        "title": "path"
+      },
       "default": [],
-      "visibleWhen": { "key": "photoSource", "notEquals": "Albums" },
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": "Albums"
+      },
       "fields": [
         {
           "key": "path",
@@ -84,7 +97,10 @@
       "default": false,
       "group": "Connection",
       "description": "Applies only to Files folders; albums are never traversed recursively. Up to 20 levels, 100 collections and 5000 unique photos per refresh, with loop detection.",
-      "visibleWhen": { "key": "photoSource", "notEquals": "Albums" }
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": "Albums"
+      }
     },
     {
       "key": "albums",
@@ -95,9 +111,14 @@
       "addTitle": "Add album",
       "minItems": 0,
       "maxItems": 32,
-      "row": { "title": "name" },
+      "row": {
+        "title": "name"
+      },
       "default": [],
-      "visibleWhen": { "key": "photoSource", "notEquals": "Folders" },
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": "Folders"
+      },
       "fields": [
         {
           "key": "name",
@@ -170,6 +191,46 @@
       "default": false,
       "group": "Connection",
       "description": "Use only on a trusted local network. HTTPS is recommended."
+    },
+    {
+      "key": "nightMode",
+      "type": "boolean",
+      "title": "Night mode",
+      "default": false,
+      "group": "Night mode",
+      "description": "Turn off the display after the room stays dark while this photo frame is visible, and wake it when daylight returns. Requires a light sensor and Kiosk Satellite screen-off permission."
+    },
+    {
+      "key": "nightLux",
+      "type": "number",
+      "title": "Night light threshold",
+      "default": 5,
+      "group": "Night mode",
+      "description": "Enter night mode at or below this value. Exit and wake above 125% of it, matching the native Clock (5 lx wakes above 6.25 lx). Unavailable readings suspend the countdown.",
+      "min": 0,
+      "max": 1000,
+      "step": 1,
+      "unit": "lx",
+      "visibleWhen": {
+        "key": "nightMode",
+        "equals": true
+      }
+    },
+    {
+      "key": "nightMinutes",
+      "type": "number",
+      "title": "Turn screen off after",
+      "default": 2,
+      "group": "Night mode",
+      "description": "Continuous minutes in night mode while this screensaver is shown. Waking the screen starts a fresh delay; normal Kiosk Satellite wake controls still apply.",
+      "min": 1,
+      "max": 60,
+      "step": 1,
+      "unit": "min",
+      "visibleWhen": {
+        "key": "nightMode",
+        "equals": true
+      }
     }
   ],
   "commands": [
@@ -188,6 +249,9 @@
     },
     {
       "title": "Slideshow"
+    },
+    {
+      "title": "Night mode"
     }
   ],
   "icon": "icon.png"

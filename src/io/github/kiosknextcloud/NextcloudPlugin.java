@@ -17,6 +17,7 @@ public final class NextcloudPlugin implements KioskPlugin {
     private final java.util.function.LongSupplier clock;
     private PluginHost host;
     private Session session;
+    private NightMode night;
     private boolean alive;
     private volatile boolean active, screenOn = true;
     private volatile String view;
@@ -28,6 +29,11 @@ public final class NextcloudPlugin implements KioskPlugin {
     @Override public void start(PluginHost host, Map<String, Object> settings) {
         synchronized (lock) {
             this.host = host; alive = true;
+            if (night != null) night.close();
+            night = new NightMode(lock, host, new NightMode.Display() {
+                @Override public boolean selected() { return alive && active && VIEW.equals(view); }
+                @Override public boolean screenOn() { return screenOn; }
+            }, clock);
             active = false; screenOn = false; view = null;
             saverRevision++; screenRevision++;
         }
@@ -47,6 +53,7 @@ public final class NextcloudPlugin implements KioskPlugin {
                 if (screen) screenOn = Boolean.TRUE.equals(data);
                 else active = Boolean.TRUE.equals(data);
                 if (session != null) session.updateActivity();
+                if (night != null) night.updateActivity();
             }
         });
     }
@@ -54,6 +61,7 @@ public final class NextcloudPlugin implements KioskPlugin {
     @Override public void configure(Map<String, Object> settings) {
         synchronized (lock) {
             if (!alive) return;
+            if (night != null) night.configure(settings);
             if (session != null) { session.close(); session = null; }
             try {
                 Config config = new Config(settings);
@@ -70,6 +78,7 @@ public final class NextcloudPlugin implements KioskPlugin {
 
     @Override public void execute(String command, Map<String, Object> arguments) {
         synchronized (lock) {
+            if (!alive) return;
             if (session == null) return;
             if (command.equals("refresh")) session.refresh = true;
             else if (command.equals("next")) session.advance = true;
@@ -79,22 +88,29 @@ public final class NextcloudPlugin implements KioskPlugin {
 
     @Override public void onEvent(String event, Map<String, Object> payload) {
         synchronized (lock) {
+            if (!alive) return;
             if (event.equals("ks.screensaver.state")) {
                 saverRevision++;
                 active = Boolean.TRUE.equals(payload.get("active"));
             } else if (event.equals("ks.screen.state")) {
                 screenRevision++;
                 screenOn = Boolean.TRUE.equals(payload.get("on"));
+                if (night != null) night.screenState(screenOn);
             } else if (event.equals("ks.screensaver.view")) {
                 view = payload.get("view") instanceof String ? (String) payload.get("view") : null;
+            } else if (event.equals("ks.device.light")) {
+                if (night != null) night.light(payload.get("lux"));
             }
             if (session != null) session.updateActivity();
+            if (night != null) night.updateActivity();
         }
     }
 
     @Override public void stop() {
         synchronized (lock) {
             alive = false;
+            if (night != null) night.close();
+            night = null;
             if (session != null) session.close();
             session = null;
             // The host has already revoked this session and removes its renderer itself.
@@ -277,7 +293,10 @@ public final class NextcloudPlugin implements KioskPlugin {
         private void report(String message, boolean error) {
             synchronized (lock) {
                 if (alive && session == this && !closed) {
-                    try { host.status(message, error); }
+                    try {
+                        String warning = night == null ? "" : night.warning();
+                        host.status(warning.isEmpty() ? message : message + " " + warning, error || !warning.isEmpty());
+                    }
                     catch (IllegalStateException ignored) { /* revoked session */ }
                 }
             }

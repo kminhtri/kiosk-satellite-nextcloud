@@ -24,6 +24,7 @@ public final class NextcloudTest {
         multipleFolders();
         albumSources();
         previewFallback();
+        NightModeTest.run();
         try (Fixture fixture = new Fixture()) {
             webdav(fixture);
             slideshow(fixture);
@@ -608,7 +609,7 @@ public final class NextcloudTest {
 
     static String listing(String entries) { return "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\">" + entries + "</d:multistatus>"; }
 
-    static final class Host implements PluginHost {
+    static class Host implements PluginHost {
         final AtomicInteger images = new AtomicInteger(), publishes = new AtomicInteger();
         final AtomicInteger memoryReports = new AtomicInteger();
         volatile boolean failMemoryStatus;
