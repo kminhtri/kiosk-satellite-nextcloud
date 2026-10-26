@@ -1,6 +1,6 @@
 # Personal Nextcloud Photos albums
 
-In Plugin Manager, choose **Photo source → Albums** or **Folders and albums**, then add rows under **Nextcloud Photos albums**. Enter the exact personal album name, such as `Holidays 2026`, using the capitalization shown in the Photos app. Do not enter its browser URL or a filesystem path. Names containing slashes are not supported.
+In Plugin Manager, choose **Photo source → Albums** or **Folders and albums**, then use **Add album** under **Photo albums**. Folder and album selections use the same editable-list layout. Enter the exact personal album name, such as `Holidays 2026`, using the capitalization shown in the Photos app. Do not enter its browser URL or a filesystem path. Names containing slashes are not supported.
 
 Use the same server URL, username and app password as for Files folders. The Nextcloud Photos app must be enabled. Only the selected sources are requested, and only when this screensaver is visible and the screen is on. With Albums selected, old folder settings are retained but ignored; switching back to Folders restores them.
 

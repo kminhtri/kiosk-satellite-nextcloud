@@ -44,7 +44,7 @@
       "type": "select",
       "title": "Photo source",
       "default": "Folders",
-      "group": "Connection",
+      "group": "Photo sources",
       "description": "Read Files folders, personal albums from the Nextcloud Photos app, or combine both in one slideshow.",
       "options": [
         "Folders",
@@ -53,25 +53,32 @@
       ]
     },
     {
-      "key": "folder",
-      "type": "string",
-      "title": "Photo folder",
-      "default": "Photos",
-      "group": "Connection",
-      "description": "Folder relative to your Nextcloud Files home. For a Photos album, change Photo source instead.",
+      "key": "folderListVersion",
+      "type": "number",
+      "title": "Folder list schema",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "step": 1,
+      "group": "Photo sources",
       "visibleWhen": {
         "key": "photoSource",
-        "notEquals": "Albums"
+        "notEquals": [
+          "Folders",
+          "Albums",
+          "Folders and albums"
+        ]
       }
     },
     {
-      "key": "additionalFolders",
+      "key": "folders",
       "type": "list",
-      "title": "Additional photo folders",
-      "group": "Connection",
-      "description": "Add other folders from the same account. Photos from all selected folders form one slideshow; duplicates are skipped.",
-      "addTitle": "Add photo folder",
-      "maxItems": 31,
+      "title": "Photo folders",
+      "group": "Photo sources",
+      "description": "Add folder paths relative to Nextcloud Files home, for example Photos/Family. Use / for Files home. Up to 32 folders and albums in total.",
+      "addTitle": "Add folder",
+      "minItems": 0,
+      "maxItems": 32,
       "row": {
         "title": "path"
       },
@@ -85,29 +92,63 @@
           "key": "path",
           "type": "string",
           "title": "Folder path",
+          "description": "Relative to Files home, for example Photos/Family. Use / for Files home.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "key": "folder",
+      "type": "string",
+      "title": "Photo folder",
+      "default": "Photos",
+      "group": "Photo sources",
+      "description": "Folder relative to your Nextcloud Files home. For a Photos album, change Photo source instead.",
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": [
+          "Folders",
+          "Albums",
+          "Folders and albums"
+        ]
+      }
+    },
+    {
+      "key": "additionalFolders",
+      "type": "list",
+      "title": "Additional photo folders",
+      "group": "Photo sources",
+      "description": "Add other folders from the same account. Photos from all selected folders form one slideshow; duplicates are skipped.",
+      "addTitle": "Add photo folder",
+      "maxItems": 31,
+      "row": {
+        "title": "path"
+      },
+      "default": [],
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": [
+          "Folders",
+          "Albums",
+          "Folders and albums"
+        ]
+      },
+      "fields": [
+        {
+          "key": "path",
+          "type": "string",
+          "title": "Folder path",
           "description": "Relative to your Nextcloud Files home, for example Holidays/2026.",
           "required": true
         }
       ]
     },
     {
-      "key": "includeSubfolders",
-      "type": "boolean",
-      "title": "Include subfolders",
-      "default": false,
-      "group": "Connection",
-      "description": "Applies only to Files folders; albums are never traversed recursively. Up to 20 levels, 100 collections and 5000 unique photos per refresh, with loop detection.",
-      "visibleWhen": {
-        "key": "photoSource",
-        "notEquals": "Albums"
-      }
-    },
-    {
       "key": "albums",
       "type": "list",
-      "title": "Nextcloud Photos albums",
-      "group": "Connection",
-      "description": "Add at least one personal album belonging to this account, using its exact name. No public links or shared albums. Select up to 32 folders and albums in total.",
+      "title": "Photo albums",
+      "group": "Photo sources",
+      "description": "Add exact personal album names from Nextcloud Photos. Public links and shared albums are not supported. Up to 32 folders and albums in total.",
       "addTitle": "Add album",
       "minItems": 0,
       "maxItems": 32,
@@ -128,6 +169,18 @@
           "required": true
         }
       ]
+    },
+    {
+      "key": "includeSubfolders",
+      "type": "boolean",
+      "title": "Include subfolders",
+      "default": false,
+      "group": "Photo sources",
+      "description": "Applies only to Files folders; albums are never traversed recursively. Up to 20 levels, 100 collections and 5000 unique photos per refresh, with loop detection.",
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": "Albums"
+      }
     },
     {
       "key": "secondsPerPhoto",
@@ -246,6 +299,9 @@
   "groups": [
     {
       "title": "Connection"
+    },
+    {
+      "title": "Photo sources"
     },
     {
       "title": "Slideshow"

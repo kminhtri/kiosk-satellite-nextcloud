@@ -38,18 +38,9 @@ final class Config {
         LinkedHashSet<HttpUrl> selected = new LinkedHashSet<>();
         if (useFolders) {
             HttpUrl.Builder home = dav.newBuilder().addPathSegment("files").addPathSegment(username);
-            selected.add(folderUrl(home, text(values, "folder", "Photos")));
-            Object additional = values.get("additionalFolders");
-            if (additional != null) {
-                if (!(additional instanceof List) || ((List<?>) additional).size() > 31)
-                    throw new IllegalArgumentException("Select at most 31 additional photo folders.");
-                for (Object row : (List<?>) additional) {
-                    Object path = row instanceof Map ? ((Map<?, ?>) row).get("path") : null;
-                    if (!(path instanceof String) || ((String) path).trim().isEmpty())
-                        throw new IllegalArgumentException("Enter a path for each additional photo folder.");
-                    selected.add(folderUrl(home, ((String) path).trim()));
-                }
-            }
+            List<String> paths = FolderSettings.paths(values);
+            if (paths.isEmpty()) throw new IllegalArgumentException("Add at least one photo folder, or choose Albums as the photo source.");
+            for (String path : paths) selected.add(folderUrl(home, path));
         }
         folders = Collections.unmodifiableList(new ArrayList<>(selected));
         folder = folders.isEmpty() ? null : folders.get(0);

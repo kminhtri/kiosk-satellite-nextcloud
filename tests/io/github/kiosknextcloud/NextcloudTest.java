@@ -25,6 +25,7 @@ public final class NextcloudTest {
         albumSources();
         previewFallback();
         NightModeTest.run();
+        FolderSettingsTest.run();
         try (Fixture fixture = new Fixture()) {
             webdav(fixture);
             slideshow(fixture);

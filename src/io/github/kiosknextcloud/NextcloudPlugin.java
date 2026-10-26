@@ -18,6 +18,7 @@ public final class NextcloudPlugin implements KioskPlugin {
     private PluginHost host;
     private Session session;
     private NightMode night;
+    private String folderMigrationWarning = "";
     private boolean alive;
     private volatile boolean active, screenOn = true;
     private volatile String view;
@@ -61,13 +62,30 @@ public final class NextcloudPlugin implements KioskPlugin {
     @Override public void configure(Map<String, Object> settings) {
         synchronized (lock) {
             if (!alive) return;
+            folderMigrationWarning = "";
+            try {
+                Map<String, Object> patch = FolderSettings.migration(settings);
+                if (!patch.isEmpty()) {
+                    try {
+                        host.updateSettings(patch);
+                        settings = new HashMap<>(settings);
+                        settings.putAll(patch);
+                    } catch (UnsupportedOperationException | IllegalStateException | LinkageError error) {
+                        folderMigrationWarning = "Existing folders remain active. Update Kiosk Satellite to import them into the unified folder list.";
+                    }
+                }
+            } catch (IllegalArgumentException error) {
+                // Album-only configurations must keep ignoring inactive legacy folder values.
+                if (!"Albums".equals(Config.text(settings, "photoSource", "Folders")))
+                    folderMigrationWarning = "Could not import the old folder selection. Check the Photo folders list before using folders.";
+            }
             if (night != null) night.configure(settings);
             if (session != null) { session.close(); session = null; }
             try {
                 Config config = new Config(settings);
                 session = new Session(config);
                 host.publishScreensaver("photos", TITLE, Renderer.message("Waiting for Nextcloud Photo Frame to start…"));
-                host.status("Ready. Photos load when this screensaver is visible.", false);
+                host.status("Ready. Photos load when this screensaver is visible." + (folderMigrationWarning.isEmpty() ? "" : " " + folderMigrationWarning), !folderMigrationWarning.isEmpty());
                 session.start();
             } catch (IllegalArgumentException error) {
                 host.publishScreensaver("photos", TITLE, Renderer.message(error.getMessage()));
@@ -295,6 +313,7 @@ public final class NextcloudPlugin implements KioskPlugin {
                 if (alive && session == this && !closed) {
                     try {
                         String warning = night == null ? "" : night.warning();
+                        if (!folderMigrationWarning.isEmpty()) warning = (warning.isEmpty() ? "" : warning + " ") + folderMigrationWarning;
                         host.status(warning.isEmpty() ? message : message + " " + warning, error || !warning.isEmpty());
                     }
                     catch (IllegalStateException ignored) { /* revoked session */ }
