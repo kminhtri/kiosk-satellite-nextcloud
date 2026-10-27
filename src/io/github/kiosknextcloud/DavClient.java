@@ -52,10 +52,14 @@ final class DavClient implements AutoCloseable {
     }
 
     DavClient(Config config) {
+        this(config, new OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS).callTimeout(90, TimeUnit.SECONDS)
+                .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build());
+    }
+
+    DavClient(Config config, OkHttpClient http) {
         this.config = config;
-        http = new OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS)
-                .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build();
+        this.http = http;
     }
 
     List<Photo> list() throws IOException {
@@ -83,6 +87,9 @@ final class DavClient implements AutoCloseable {
                     throw new IOException("Nextcloud album was not found. Check its exact name and that the Photos app is enabled.");
                 require(response, 207);
                 listing = parse(read(response.body(), MAX_XML, LIST_SIZE_ERROR), directory, directory);
+            } catch (InterruptedIOException error) {
+                if (Thread.currentThread().isInterrupted()) throw error;
+                throw timeout(current.album ? "listing an album" : "listing a folder", error);
             } finally { finished(call); }
             String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
             // Album collection IDs are not filesystem folder IDs. Albums have
@@ -140,7 +147,15 @@ final class DavClient implements AutoCloseable {
                     response.header("Content-Type", "").split(";", 2)[0].trim().toLowerCase(Locale.ROOT)))
                 throw new IOException("Nextcloud did not return a supported photo preview. Enable image previews or use a smaller copy.");
             return read(response.body(), MAX_IMAGE, sizeError);
+        } catch (InterruptedIOException error) {
+            if (Thread.currentThread().isInterrupted()) throw error;
+            throw timeout(preview ? "loading a photo preview" : "downloading a photo", error);
         } finally { finished(call); }
+    }
+
+    private static IOException timeout(String operation, InterruptedIOException cause) {
+        return new IOException("Nextcloud timed out while " + operation
+                + ". The server took too long to respond or finish the transfer. Retrying in 30 seconds.", cause);
     }
 
     void setActive(boolean active) {

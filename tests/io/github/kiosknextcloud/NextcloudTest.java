@@ -24,6 +24,7 @@ public final class NextcloudTest {
         multipleFolders();
         albumSources();
         previewFallback();
+        TimeoutTest.run();
         NightModeTest.run();
         FolderSettingsTest.run();
         try (Fixture fixture = new Fixture()) {
@@ -657,6 +658,7 @@ public final class NextcloudTest {
         volatile int previewStatus = 200;
         volatile boolean oversizedPreview, invalidPreviewType, chunkedImage;
         volatile CountDownLatch block, entered;
+        volatile boolean blockPreview;
         final String root = "/remote.php/dav/files/alice/Photos/";
         Fixture() throws IOException {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -671,7 +673,7 @@ public final class NextcloudTest {
                 if (!Credentials.basic("alice", "test-password").equals(exchange.getRequestHeaders().getFirst("Authorization"))) badAuth.incrementAndGet();
                 if (!("KioskSatellite-NextcloudPhotoFrame/" + BuildInfo.VERSION).equals(exchange.getRequestHeaders().getFirst("User-Agent"))) badAgent.incrementAndGet();
                 CountDownLatch gate = block;
-                if (gate != null) {
+                if (gate != null && (!blockPreview || exchange.getRequestURI().getPath().endsWith("/index.php/core/preview"))) {
                     entered.countDown();
                     try { gate.await(8, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 }
