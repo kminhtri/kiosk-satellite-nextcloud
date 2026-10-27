@@ -23,7 +23,7 @@ You can also install it manually:
 
 ### Local ZIP installation and configuration
 
-1. Transfer `dist/nextcloud-photos-0.5.0.zip` to the kiosk, or use its remote admin interface.
+1. Transfer `dist/nextcloud-photos-0.5.1.zip` to the kiosk, or use its remote admin interface.
 2. Open **Settings → Plugin Manager**, enable plugins, then **Developer Tools → Install from ZIP**.
 3. Select the ZIP, review and trust it, then enable **Nextcloud Photo Frame**. A local ZIP cannot replace a plugin installed from GitHub. Switching to local testing requires uninstalling first, which deletes saved settings; record them before switching, or wait for the GitHub release update.
 4. Open the plugin's settings and enter:
@@ -65,6 +65,8 @@ Only the configured Nextcloud server receives requests, using PROPFIND and authe
 Night mode uses Kiosk Satellite's own ambient-light readings and screen controls. The `host.control` capability allows display power-off and waking; the feature is disabled by default. It does not request Android permissions or change the app's native Clock screensaver settings.
 
 HTTPS certificate validation remains enabled. Redirects are refused; enter the final canonical server URL. HTTP is disabled unless **Allow unencrypted HTTP** is explicitly enabled; the Android host's cleartext-network policy must also permit it. Never put a password in the server URL. Returned image paths must stay within the selected Files folders or be direct entries of a selected Photos album, on the configured origin. The oversized-photo fallback uses only the configured server's `/index.php/core/preview` endpoint, with a numeric file ID from the selected DAV entry; server-supplied preview URLs are never followed.
+
+Requests allow 10 seconds to connect, 60 seconds without receiving data and 90 seconds in total per request. This accommodates slow album listings and preview generation. Timeout messages identify whether a folder listing, album listing, original photo or preview failed; they do not include credentials or private URLs. Requests still cancel when the photo frame is hidden or the screen turns off.
 
 Select folders or personal albums directly in the plugin rather than creating shortcuts. URL shortcut files, public share URLs and remote download URLs are not followed. Album photos are downloaded using their album DAV hrefs; the plugin does not request arbitrary original-path references. See [album protocol and scope](docs/nextcloud-albums.md).
 

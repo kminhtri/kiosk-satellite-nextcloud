@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Allow 60 seconds without receiving data and 90 seconds in total per request, so album listings taking more than 15 seconds to prepare can load. Keep the 10-second connect timeout, response-size limits and cancellation when hidden or screen-off.
+- Identify timeouts during folder/album listing, photo download or preview loading instead of showing the generic connection/certificate error.
+- Add HTTP regressions for a delayed album response, read and total-request timeouts, safe error messages and cancellation.
+
 ## 0.5.0
 
 - Add an optional night mode with a switch, ambient-light threshold and continuous-darkness delay, defaulting to off, 5 lx and 2 minutes.
