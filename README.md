@@ -23,7 +23,7 @@ You can also install it manually:
 
 ### Local ZIP installation and configuration
 
-1. Transfer `dist/nextcloud-photos-0.5.1.zip` to the kiosk, or use its remote admin interface.
+1. Transfer `dist/nextcloud-photos-0.5.2.zip` to the kiosk, or use its remote admin interface.
 2. Open **Settings → Plugin Manager**, enable plugins, then **Developer Tools → Install from ZIP**.
 3. Select the ZIP, review and trust it, then enable **Nextcloud Photo Frame**. A local ZIP cannot replace a plugin installed from GitHub. Switching to local testing requires uninstalling first, which deletes saved settings; record them before switching, or wait for the GitHub release update.
 4. Open the plugin's settings and enter:
@@ -63,6 +63,8 @@ Images are resized to at most 1920 pixels on their longest side and compressed t
 Only the configured Nextcloud server receives requests, using PROPFIND and authenticated GET. No analytics, intermediary service or Home Assistant token is used. Credentials are stored through Kiosk Satellite's `secret` setting type and never embedded in screensaver HTML or diagnostic messages. This setting type does not establish a separate security boundary from trusted code in the host app.
 
 Night mode uses Kiosk Satellite's own ambient-light readings and screen controls. The `host.control` capability allows display power-off and waking; the feature is disabled by default. It does not request Android permissions or change the app's native Clock screensaver settings.
+
+Voice Assist automatically suspends the plugin's night screen-off while listening, processing or responding, while its full or docked overlay remains visible, or while a reported voice interaction is active. Closing Assist starts a full new night delay. The plugin observes activity only, without speech, transcripts or answer text. This protects against its own night screen-off; it does not override an Android timeout, external screen-off automation or manual power-off.
 
 HTTPS certificate validation remains enabled. Redirects are refused; enter the final canonical server URL. HTTP is disabled unless **Allow unencrypted HTTP** is explicitly enabled; the Android host's cleartext-network policy must also permit it. Never put a password in the server URL. Returned image paths must stay within the selected Files folders or be direct entries of a selected Photos album, on the configured origin. The oversized-photo fallback uses only the configured server's `/index.php/core/preview` endpoint, with a numeric file ID from the selected DAV entry; server-supplied preview URLs are never followed.
 

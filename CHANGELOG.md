@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+- Suspend night screen-off during Voice Assist turns, active voice interactions and visible full/docked Assist overlays. Start a full new delay only after the interaction and overlay end.
+- Restore a display powered off by plugin night mode when Assist starts, and correct a late successful screen-off that would cover a newer voice interaction. Respect manual power-off.
+- Read initial Voice Satellite state, preserve newer live events over stale snapshots and observe only activity, without conversation content. Fall back to supported event feeds on older SDK hosts.
+- Cover voice states, overlay visibility, overlapping interaction sources, startup races, late callbacks, lifecycle cleanup and voice events during blocked photo requests.
+
 ## 0.5.1
 
 - Allow 60 seconds without receiving data and 90 seconds in total per request, so album listings taking more than 15 seconds to prepare can load. Keep the 10-second connect timeout, response-size limits and cancellation when hidden or screen-off.

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "nextcloud-photos",
   "name": "Nextcloud Photo Frame",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "apiVersion": 1,
   "minAndroidSdk": 24,
   "entryClass": "io.github.kiosknextcloud.NextcloudPlugin",
@@ -251,7 +251,7 @@
       "title": "Night mode",
       "default": false,
       "group": "Night mode",
-      "description": "Turn off the display after the room stays dark while this photo frame is visible, and wake it when daylight returns. Requires a light sensor and Kiosk Satellite screen-off permission."
+      "description": "Turn off the display after the room stays dark while this photo frame is visible, and wake it when daylight returns. Paused during Voice Assist and while its overlay is visible. Requires a light sensor and Kiosk Satellite screen-off permission."
     },
     {
       "key": "nightLux",
