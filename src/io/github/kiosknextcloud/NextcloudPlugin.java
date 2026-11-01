@@ -118,6 +118,8 @@ public final class NextcloudPlugin implements KioskPlugin {
                 view = payload.get("view") instanceof String ? (String) payload.get("view") : null;
             } else if (event.equals("ks.device.light")) {
                 if (night != null) night.light(payload.get("lux"));
+            } else if (event.startsWith("ks.voice.")) {
+                if (night != null) night.voiceEvent(event, payload);
             }
             if (session != null) session.updateActivity();
             if (night != null) night.updateActivity();

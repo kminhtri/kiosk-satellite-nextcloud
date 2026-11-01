@@ -13,6 +13,7 @@ final class NightModeTest {
         invalidReadingsAndChanges();
         lateCallbacks();
         daylightWake();
+        VoiceNightTest.run();
         independentOfDownloads();
     }
 
@@ -224,19 +225,24 @@ final class NightModeTest {
 
     static final class Rig implements AutoCloseable {
         final AtomicLong clock = new AtomicLong();
-        final LightHost host = new LightHost();
+        final LightHost host;
         boolean selected, on = true;
-        final NightMode mode = new NightMode(new Object(), host, new NightMode.Display() {
-            @Override public boolean selected() { return selected; }
-            @Override public boolean screenOn() { return on; }
-        }, clock::get);
+        final NightMode mode;
+        Rig() { this(new LightHost()); }
+        Rig(LightHost host) {
+            this.host = host;
+            mode = new NightMode(new Object(), host, new NightMode.Display() {
+                @Override public boolean selected() { return selected; }
+                @Override public boolean screenOn() { return on; }
+            }, clock::get);
+        }
         void select(boolean value) { selected = value; mode.updateActivity(); }
         void screen(boolean value) { on = value; mode.screenState(value); mode.updateActivity(); }
         void advance(long milliseconds) { clock.addAndGet(milliseconds); mode.check(); }
         @Override public void close() { mode.close(); }
     }
 
-    static final class LightHost extends Host {
+    static class LightHost extends Host {
         final AtomicInteger off = new AtomicInteger(), on = new AtomicInteger(), reads = new AtomicInteger();
         final AtomicInteger subscribes = new AtomicInteger(), unsubscribes = new AtomicInteger();
         volatile boolean present = true, live = true, refuseOff, refuseWake, delayLight, delayOff;

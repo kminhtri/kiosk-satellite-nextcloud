@@ -17,9 +17,11 @@ final class NightMode implements AutoCloseable {
     private final Display display;
     private final LongSupplier clock;
     private final ScheduledExecutorService worker;
+    private final VoiceActivity voice;
     private ScheduledFuture<?> timer;
     private boolean enabled, closed, attempted, wasVisible;
     private boolean poweredOffByNight, wakeAttempted, nightState;
+    private boolean voiceBlocked;
     private long wakeRevision;
     private Double lux;
     private int threshold = 5, minutes = 2;
@@ -28,6 +30,7 @@ final class NightMode implements AutoCloseable {
 
     NightMode(Object lock, PluginHost host, Display display, LongSupplier clock) {
         this.lock = lock; this.host = host; this.display = display; this.clock = clock;
+        voice = new VoiceActivity(lock, host, this::voiceChanged);
         worker = Executors.newSingleThreadScheduledExecutor(task -> {
             Thread thread = new Thread(task, "NextcloudNightMode");
             thread.setDaemon(true);
@@ -48,11 +51,13 @@ final class NightMode implements AutoCloseable {
             reset(); failure = null; wakeAttempted = false;
             if (enabled && !wasEnabled) {
                 lux = null;
+                voice.start();
                 try { host.subscribe("device.light"); }
                 catch (IllegalArgumentException | IllegalStateException error) { failure = "Night mode cannot read the light sensor on this host."; }
                 readLight();
             } else if (!enabled && wasEnabled) {
                 lux = null;
+                voice.stop();
                 try { host.unsubscribe("device.light"); }
                 catch (IllegalArgumentException | IllegalStateException ignored) { /* host may already be revoked */ }
             }
@@ -103,6 +108,7 @@ final class NightMode implements AutoCloseable {
             if (woke) {
                 // Recheck sensor liveness when a frame becomes visible or wakes from screen-off.
                 lightRevision++; lux = null; reset();
+                voice.refresh();
                 readLight();
             }
         }
@@ -119,6 +125,21 @@ final class NightMode implements AutoCloseable {
         }
     }
 
+    void voiceEvent(String event, Map<String, Object> payload) {
+        synchronized (lock) { if (!closed) voice.event(event, payload); }
+    }
+
+    private void voiceChanged() {
+        if (closed) return;
+        boolean blocked = voice.blocksScreenOff();
+        if (blocked != voiceBlocked) {
+            voiceBlocked = blocked;
+            epoch++; reset();
+            if (blocked) wakeAttempted = false;
+        }
+        review();
+    }
+
     private void decide() {
         if (!enabled || lux == null) nightState = false;
         else if (lux <= threshold) nightState = true;
@@ -129,11 +150,11 @@ final class NightMode implements AutoCloseable {
 
     private void review() {
         boolean visible = display.selected() && display.screenOn();
-        if (poweredOffByNight && display.selected()
-                && (!enabled || (lux != null && !dark()))) restoreScreen(false);
+        if (poweredOffByNight && (voice.active() || (display.selected()
+                && (!enabled || (lux != null && !dark()))))) restoreScreen(false);
         if (visible && !wasVisible) { epoch++; reset(); }
         wasVisible = visible;
-        if (!enabled || !display.selected() || !dark()) {
+        if (!enabled || !display.selected() || !dark() || voice.blocksScreenOff()) {
             if (darkSince >= 0 || attempted) epoch++;
             reset();
             return;
@@ -166,7 +187,7 @@ final class NightMode implements AutoCloseable {
                             return;
                         }
                         // A newer view, light transition, setting or wake must win over a late screen-off.
-                        if (requestEpoch != epoch || requestWakeRevision != wakeRevision || !enabled || !display.selected() || !dark()) {
+                        if (requestEpoch != epoch || requestWakeRevision != wakeRevision || !enabled || !display.selected() || !dark() || voice.blocksScreenOff()) {
                             restoreScreen(true);
                         } else poweredOffByNight = true;
                     }
@@ -203,6 +224,7 @@ final class NightMode implements AutoCloseable {
         synchronized (lock) {
             if (!enabled || closed) return "";
             if (failure != null) return failure;
+            if (voice.pending()) return "Night mode is waiting for Voice Assist state; screen-off is suspended.";
             return lux == null ? "Night mode is waiting for a live ambient light reading; screen-off is suspended." : "";
         }
     }
@@ -211,6 +233,6 @@ final class NightMode implements AutoCloseable {
     private void reset() { cancelTimer(); darkSince = -1; attempted = false; }
 
     @Override public void close() {
-        synchronized (lock) { closed = true; epoch++; reset(); worker.shutdownNow(); }
+        synchronized (lock) { closed = true; epoch++; reset(); voice.stop(); worker.shutdownNow(); }
     }
 }
