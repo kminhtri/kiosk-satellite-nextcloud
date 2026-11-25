@@ -28,6 +28,7 @@ public final class NextcloudTest {
         ShuffleTest.run();
         FolderScanTest.run();
         ProgressiveStartTest.run();
+        NavigationTest.run();
         TimeoutTest.run();
         NightModeTest.run();
         FolderSettingsTest.run();

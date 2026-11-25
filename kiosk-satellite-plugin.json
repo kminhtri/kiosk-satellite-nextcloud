@@ -269,6 +269,14 @@
       ]
     },
     {
+      "key": "showSourceName",
+      "type": "boolean",
+      "title": "Show source name",
+      "default": false,
+      "group": "Slideshow",
+      "description": "Show the album or individual folder name in small text at the bottom of each photo."
+    },
+    {
       "key": "refreshMinutes",
       "type": "number",
       "title": "Refresh sources every",
@@ -348,6 +356,10 @@
     {
       "id": "next",
       "title": "Next photo"
+    },
+    {
+      "id": "previous",
+      "title": "Previous photo"
     }
   ],
   "groups": [

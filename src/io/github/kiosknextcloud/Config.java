@@ -7,10 +7,10 @@ import okhttp3.Credentials;
 
 final class Config {
     static final int DEFAULT_COLLECTION_LIMIT = 1000, MAX_COLLECTION_LIMIT = 10000;
-    final HttpUrl folder, preview;
+    final HttpUrl folder, preview, filesHome;
     final List<HttpUrl> folders, albums;
     final String authorization;
-    final boolean recursive, fill;
+    final boolean recursive, fill, showSourceName;
     final ShuffleMode shuffleMode;
     final int seconds, refreshMinutes, cachePhotos, maxCollections;
 
@@ -32,6 +32,7 @@ final class Config {
         preview = url.build().newBuilder().addPathSegment("index.php").addPathSegment("core").addPathSegment("preview").build();
         url.addPathSegment("remote.php").addPathSegment("dav");
         HttpUrl dav = url.build();
+        filesHome = dav.newBuilder().addPathSegment("files").addPathSegment(username).addPathSegment("").build();
         String source = text(values, "photoSource", "Folders");
         boolean useFolders = source.equals("Folders") || source.equals("Folders and albums");
         boolean useAlbums = source.equals("Albums") || source.equals("Folders and albums");
@@ -67,10 +68,21 @@ final class Config {
         recursive = useFolders && Boolean.TRUE.equals(values.get("includeSubfolders"));
         shuffleMode = ShuffleMode.read(values);
         fill = "Fill".equals(values.get("fit"));
+        showSourceName = Boolean.TRUE.equals(values.get("showSourceName"));
         seconds = number(values, "secondsPerPhoto", 30, 5, 600);
         refreshMinutes = number(values, "refreshMinutes", 15, 1, 1440);
         cachePhotos = number(values, "cachePhotos", 12, 2, 30);
         maxCollections = number(values, "maxCollections", DEFAULT_COLLECTION_LIMIT, 100, MAX_COLLECTION_LIMIT);
+    }
+
+    String sourceName(DavClient.Photo photo) {
+        HttpUrl source = photo.source == null ? photo.url.resolve(".") : photo.source;
+        if (source == null) return "";
+        if (source.equals(filesHome)) return "Files home";
+        List<String> segments = source.pathSegments();
+        for (int i = segments.size() - 1; i >= 0; i--)
+            if (!segments.get(i).isEmpty()) return segments.get(i);
+        return "";
     }
 
     private static HttpUrl folderUrl(HttpUrl.Builder home, String path) {
