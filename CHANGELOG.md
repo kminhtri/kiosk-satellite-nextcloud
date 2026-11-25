@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+- Add optional Show source name captions with escaped album/individual folder names and accurate labels during cached offline playback; keep the option off by default.
+- Add Previous photo navigation through the last 100 successfully displayed photo references in every shuffle mode. Forward navigation and automatic rotation retrace history before resuming the playlist, with no larger image cache. Preserve history on periodic refresh and reset it on manual refresh/settings changes.
+- Distinguish initial album/folder listing and first-photo download in the screensaver loading message and plugin status.
+- Keep setting descriptions within Kiosk Satellite's 400-character limit and validate descriptions of settings, nested list fields and buttons before packaging.
+- Start playback from the first non-empty collection before the full scan. Give the first image request priority, then index remaining sources on a separate cancelable worker/connection while photos keep rotating.
+- Stage completed global indexes until the next photo boundary, preserve Off/Within progress, and keep provisional playback available with actionable errors if later indexing fails. Cancel indexing on hide, screen-off and stop.
+- Raise the default collection traversal cap from 100 to 1000 and add Folder and album scan limit (100–10000) for larger recursive folder trees. Keep loop detection and the 20-level depth cap, and identify the adjustable setting in limit errors.
+- Replace the Shuffle switch with Off, Within each source and Across all sources (up to 20000), preserving existing on/off settings through a partial settings migration.
+- Fall back to bounded collection-by-collection playback above 20000 photos total. Global shuffle becomes Within with an explicit status message; each individual collection remains capped at 20000 photos.
+- Preserve playback progress through periodic refreshes, skip empty collections, retry failed collection transitions and retain bounded offline caching. Document local deduplication for large-library playback and full-rescan behavior.
+- Raise the shared selection limit from 5000 to 20000 unique photos, including a single large album.
+- Stream folder and album XML listings instead of retaining complete XML buffers, strings and DOM trees; allow up to 16 MiB per listing while keeping the 8 MiB image cap and bounded photo cache.
+- Preserve source isolation, successful-property filtering, namespace handling, file-ID deduplication, cancellation and traversal limits. Reject XML declarations/entities, excessive nesting and oversized property text.
+- Cover 20000-photo chunked responses, exact/over-limit selections, duplicate IDs, streaming security boundaries and unknown-length response caps. Exercise metadata parsing separately with a 64 MiB JVM heap; this does not measure total Android app memory.
+
 ## 0.5.2
 
 - Suspend night screen-off during Voice Assist turns, active voice interactions and visible full/docked Assist overlays. Start a full new delay only after the interaction and overlay end.
