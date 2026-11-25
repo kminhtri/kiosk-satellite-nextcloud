@@ -120,6 +120,26 @@ class RepositoryTest(unittest.TestCase):
 
 
 class ManifestTest(unittest.TestCase):
+    def test_setting_description_limit_including_nested_lists(self):
+        for depth in range(3):
+            for description in ['x' * 400, 'x' * 401, '', None]:
+                setting = {'key': 'photo', 'title': 'Photo', 'type': 'string', 'description': description}
+                for _ in range(depth):
+                    setting = {'key': 'sources', 'title': 'Sources', 'type': 'list', 'fields': [setting]}
+                with self.subTest(depth=depth, description_length=len(description or '')):
+                    if description == 'x' * 400:
+                        cp.validate_manifest(manifest(settings=[setting]))
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'Invalid description'):
+                            cp.validate_manifest(manifest(settings=[setting]))
+
+    def test_button_description_limit(self):
+        button = {'id': 'refresh', 'title': 'Refresh', 'label': 'Refresh', 'description': 'x' * 400}
+        cp.validate_manifest(manifest(buttons=[button]))
+        button['description'] += 'x'
+        with self.assertRaisesRegex(ValueError, 'Invalid description'):
+            cp.validate_manifest(manifest(buttons=[button]))
+
     def test_valid_manifest(self):
         cp.validate_manifest(manifest())
         cp.validate_manifest(manifest(capabilities=['camera', 'barcode', 'ma']))

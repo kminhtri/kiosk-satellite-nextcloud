@@ -152,6 +152,14 @@ def _integer(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _validate_setting_descriptions(setting):
+    if 'description' in setting:
+        _text(setting, 'description', 400, 'settings')
+    if setting.get('type') == 'list':
+        for field in setting.get('fields', []):
+            _validate_setting_descriptions(field)
+
+
 def validate_manifest(manifest):
     """The SDK 1 manifest rules from PluginManifest.kt, down to each setting's key and type."""
     if not isinstance(manifest, dict):
@@ -208,6 +216,7 @@ def validate_manifest(manifest):
             raise ValueError('Invalid or duplicate setting key')
         keys.add(key)
         _text(setting, 'title', 80, 'settings')
+        _validate_setting_descriptions(setting)
         if setting.get('type') not in SETTING_TYPES:
             raise ValueError(f'Unsupported setting type for {key}')
         if setting.get('type') == 'secret' and setting.get('default') != '':
@@ -224,6 +233,8 @@ def validate_manifest(manifest):
             _text(item, 'title', 80, kind)
             if kind == 'buttons':
                 _text(item, 'label', 40, kind)
+                if 'description' in item:
+                    _text(item, 'description', 400, kind)
 
 
 def valid_asset_path(path):

@@ -5,9 +5,14 @@ import tempfile
 import unittest
 
 from plugin_manifest import build_manifest, write_build_info
+from community_plugins import validate_manifest
 
 
 class BuildManifestTest(unittest.TestCase):
+    def test_development_manifest_matches_kiosk_rules(self):
+        path = Path(__file__).resolve().parent.parent / 'kiosk-satellite-plugin.json'
+        validate_manifest(json.loads(build_manifest(path)))
+
     def test_release_version_overrides_source_without_editing_it(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'kiosk-satellite-plugin.json'
