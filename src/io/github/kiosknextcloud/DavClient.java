@@ -4,19 +4,23 @@ package io.github.kiosknextcloud;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import javax.xml.parsers.*;
-import org.w3c.dom.*;
-import org.xml.sax.SAXException;
-import org.xml.sax.helpers.DefaultHandler;
 import okhttp3.*;
 
 /** DAV requests stay in selected sources; oversized photos use same-server previews by file ID. */
 final class DavClient implements AutoCloseable {
-    static final int MAX_XML = 4 * 1024 * 1024, MAX_IMAGE = 8 * 1024 * 1024;
-    static final String LIST_SIZE_ERROR = "Nextcloud folder or album listing exceeded the 4 MiB size limit. Select a smaller source.";
+    static final int MAX_XML = 16 * 1024 * 1024, MAX_IMAGE = 8 * 1024 * 1024;
+    static final String LIST_SIZE_ERROR = "Nextcloud folder or album listing exceeded the 16 MiB size limit. Select a smaller source.";
     static final String PHOTO_SIZE_ERROR = "Nextcloud photo exceeded the 8 MiB download size limit. Use a smaller JPEG, PNG or WebP copy.";
     static final String PREVIEW_SIZE_ERROR = "Nextcloud photo preview exceeded the 8 MiB download size limit. Use a smaller JPEG, PNG or WebP copy.";
-    static final int MAX_FOLDERS = 100, MAX_DEPTH = 20, MAX_PHOTOS = 5000;
+    static final int MAX_FOLDERS = Config.DEFAULT_COLLECTION_LIMIT, MAX_DEPTH = 20, MAX_PHOTOS = 20000;
+    static final String PHOTO_LIMIT_ERROR = "Photo limit reached (20000); choose fewer folders or albums.";
+    static final class PhotoLimitException extends IOException {
+        final boolean singleCollection;
+        PhotoLimitException(boolean singleCollection) {
+            super(PHOTO_LIMIT_ERROR + (singleCollection ? " A single album or folder exceeds 20000 photos; split it into smaller sources." : ""));
+            this.singleCollection = singleCollection;
+        }
+    }
     static final String PROPERTIES = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop>"
             + "<d:resourcetype/><d:getcontenttype/><d:getetag/><oc:fileid/></d:prop></d:propfind>";
     final Config config;
@@ -28,7 +32,9 @@ final class DavClient implements AutoCloseable {
     static final class Photo {
         final HttpUrl url;
         final String etag, id;
-        Photo(HttpUrl url, String etag, String id) { this.url = url; this.etag = etag; this.id = id; }
+        final HttpUrl source;
+        Photo(HttpUrl url, String etag, String id) { this(url, etag, id, null); }
+        Photo(HttpUrl url, String etag, String id, HttpUrl source) { this.url = url; this.etag = etag; this.id = id; this.source = source; }
         String key() { return url.toString() + "\n" + etag; }
     }
 
@@ -63,57 +69,104 @@ final class DavClient implements AutoCloseable {
     }
 
     List<Photo> list() throws IOException {
+        return list(traversal(), Collections.emptyList());
+    }
+
+    List<Photo> list(Traversal traversal, List<Photo> seed) throws IOException {
         List<Photo> result = new ArrayList<>();
-        ArrayDeque<Folder> pending = new ArrayDeque<>();
-        Set<String> scheduledUrls = new HashSet<>(), scheduledIds = new HashSet<>(), visitedIds = new HashSet<>();
         Set<String> photoUrls = new HashSet<>(), photoIds = new HashSet<>();
-        for (HttpUrl root : config.folders) {
-            if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0));
+        for (Photo photo : seed) {
+            if (!photoUrls.add(pathKey(photo.url))) continue;
+            if (!photo.id.isEmpty() && !photoIds.add(photo.id)) continue;
+            result.add(photo);
         }
-        for (HttpUrl root : config.albums) {
-            if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0, true));
-        }
-        while (!pending.isEmpty()) {
-            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
-            Folder current = pending.remove();
-            if (!current.album && !current.id.isEmpty() && visitedIds.contains(current.id)) continue;
-            HttpUrl directory = current.url;
-            Request request = request(directory).header("Depth", "1")
-                    .method("PROPFIND", RequestBody.create(MediaType.parse("application/xml; charset=utf-8"), PROPERTIES)).build();
-            Listing listing;
-            Call call = newCall(request);
-            try (Response response = call.execute()) {
-                if (current.album && response.code() == 404)
-                    throw new IOException("Nextcloud album was not found. Check its exact name and that the Photos app is enabled.");
-                require(response, 207);
-                listing = parse(read(response.body(), MAX_XML, LIST_SIZE_ERROR), directory, directory);
-            } catch (InterruptedIOException error) {
-                if (Thread.currentThread().isInterrupted()) throw error;
-                throw timeout(current.album ? "listing an album" : "listing a folder", error);
-            } finally { finished(call); }
-            String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
-            // Album collection IDs are not filesystem folder IDs. Albums have
-            // no subalbums; only their direct photo entries are consumed.
-            if (!current.album && !id.isEmpty() && !visitedIds.add(id)) continue;
-            for (Photo photo : listing.photos) {
+        Batch batch;
+        while ((batch = traversal.next()) != null) {
+            for (Photo photo : batch.photos) {
                 if (!photoUrls.add(pathKey(photo.url))) continue;
                 if (!photo.id.isEmpty() && !photoIds.add(photo.id)) continue;
                 result.add(photo);
-                if (result.size() > MAX_PHOTOS) throw new IOException("Photo limit reached (5000); choose fewer folders or albums.");
+                if (result.size() > MAX_PHOTOS) throw new PhotoLimitException(false);
             }
+        }
+        return result;
+    }
+
+    static final class Batch {
+        final Folder folder;
+        final List<Photo> photos;
+        Batch(Folder folder, List<Photo> photos) { this.folder = folder; this.photos = photos; }
+    }
+
+    Traversal traversal() { return new Traversal(); }
+
+    Traversal continuation(Traversal from) {
+        Traversal copy = new Traversal();
+        copy.pending.clear(); copy.pending.addAll(from.pending);
+        copy.scheduledUrls.clear(); copy.scheduledUrls.addAll(from.scheduledUrls);
+        copy.scheduledIds.addAll(from.scheduledIds); copy.visitedIds.addAll(from.visitedIds);
+        return copy;
+    }
+
+    final class Traversal {
+        final ArrayDeque<Folder> pending = new ArrayDeque<>();
+        final Set<String> scheduledUrls = new HashSet<>(), scheduledIds = new HashSet<>(), visitedIds = new HashSet<>();
+        Traversal() {
+            for (HttpUrl root : config.folders)
+                if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0));
+            for (HttpUrl root : config.albums)
+                if (scheduledUrls.add(pathKey(root))) pending.add(new Folder(root, "", 0, true));
+        }
+        Batch next() throws IOException {
+            while (!pending.isEmpty()) {
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+                Folder current = pending.peek();
+                if (!current.album && !current.id.isEmpty() && visitedIds.contains(current.id)) { pending.remove(); continue; }
+                Listing listing = readFolder(current);
+                String id = listing.directoryId.isEmpty() ? current.id : listing.directoryId;
+                if (!current.album && !id.isEmpty() && visitedIds.contains(id)) { pending.remove(); continue; }
+                schedule(current, listing);
+                if (!current.album && !id.isEmpty()) visitedIds.add(id);
+                pending.remove();
+                return new Batch(current, listing.photos);
+            }
+            return null;
+        }
+        Batch reload(Folder current) throws IOException {
+            Listing listing = readFolder(current);
+            schedule(current, listing);
+            return new Batch(current, listing.photos);
+        }
+        private void schedule(Folder current, Listing listing) throws IOException {
             if (config.recursive && !current.album) for (Folder child : listing.folders) {
                 if (scheduledUrls.contains(pathKey(child.url))) continue;
-                if (!child.id.isEmpty() && (visitedIds.contains(child.id) || scheduledIds.contains(child.id))) continue;
+                if (!child.id.isEmpty() && (visitedIds.contains(child.id) || scheduledIds.contains(child.id)
+                        || child.id.equals(current.id) || child.id.equals(listing.directoryId))) continue;
                 if (current.depth >= MAX_DEPTH)
                     throw new IOException("Subfolder depth limit reached (20); select the deeper folder directly or disable subfolders.");
-                if (scheduledUrls.size() >= MAX_FOLDERS)
-                    throw new IOException("Folder limit reached (100); choose fewer folders or albums, or disable subfolders.");
+                if (scheduledUrls.size() >= config.maxCollections)
+                    throw new IOException("Folder limit reached (" + config.maxCollections
+                            + " collections). Increase Folder and album scan limit, select narrower folders, or disable subfolders.");
                 scheduledUrls.add(pathKey(child.url));
                 if (!child.id.isEmpty()) scheduledIds.add(child.id);
                 pending.add(new Folder(child.url, child.id, current.depth + 1));
             }
         }
-        return result;
+    }
+
+    private Listing readFolder(Folder current) throws IOException {
+        Request request = request(current.url).header("Depth", "1")
+                .method("PROPFIND", RequestBody.create(MediaType.parse("application/xml; charset=utf-8"), PROPERTIES)).build();
+        Call call = newCall(request);
+        try (Response response = call.execute()) {
+            if (current.album && response.code() == 404)
+                throw new IOException("Nextcloud album was not found. Check its exact name and that the Photos app is enabled.");
+            require(response, 207);
+            return DavListingReader.read(response.body(), current.url, current.url);
+        } catch (InterruptedIOException error) {
+            if (Thread.currentThread().isInterrupted()) throw error;
+            throw timeout(current.album ? "listing an album" : "listing a folder", error);
+        } finally { finished(call); }
     }
 
     byte[] download(Photo photo) throws IOException {
@@ -213,72 +266,7 @@ final class DavClient implements AutoCloseable {
     }
 
     static Listing parse(byte[] xml, HttpUrl directory, HttpUrl root) throws IOException {
-        try {
-            String source = new String(xml, java.nio.charset.StandardCharsets.UTF_8);
-            if (source.startsWith("\uFEFF")) source = source.substring(1);
-            String upper = source.toUpperCase(Locale.ROOT);
-            if (upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") || source.indexOf('\0') >= 0)
-                throw new IOException("Nextcloud returned an unsafe WebDAV directory listing.");
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            // Android and the JDK expose different optional XML security features.
-            feature(factory, "http://apache.org/xml/features/disallow-doctype-decl", true);
-            feature(factory, "http://xml.org/sax/features/external-general-entities", false);
-            feature(factory, "http://xml.org/sax/features/external-parameter-entities", false);
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            builder.setEntityResolver((publicId, systemId) -> { throw new SAXException("External XML entities are disabled"); });
-            builder.setErrorHandler(new DefaultHandler() {
-                @Override public void fatalError(org.xml.sax.SAXParseException error) throws SAXException { throw error; }
-            });
-            Document document = builder.parse(new org.xml.sax.InputSource(new StringReader(source)));
-            Listing result = new Listing();
-            NodeList responses = document.getElementsByTagNameNS("DAV:", "response");
-            for (int i = 0; i < responses.getLength(); i++) {
-                Element response = (Element) responses.item(i);
-                HttpUrl url = directory.resolve(value(response, "href"));
-                if (url == null || !within(url, root)) continue;
-                boolean self = descendant(url, directory) && pathLength(url) == pathLength(directory);
-                if (!self && !directChild(url, directory)) continue;
-                NodeList propstats = response.getElementsByTagNameNS("DAV:", "propstat");
-                String type = "", etag = "", id = "";
-                boolean collection = false, success = false;
-                for (int j = 0; j < propstats.getLength(); j++) {
-                    Element propstat = (Element) propstats.item(j);
-                    if (!value(propstat, "status").matches("HTTP/[^ ]+ 200(?: .*)?")) continue;
-                    success = true;
-                    String candidate = value(propstat, "getcontenttype");
-                    if (!candidate.isEmpty()) type = candidate.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
-                    candidate = value(propstat, "getetag");
-                    if (!candidate.isEmpty()) etag = candidate;
-                    NodeList ids = propstat.getElementsByTagNameNS("http://owncloud.org/ns", "fileid");
-                    if (ids.getLength() > 0) id = ids.item(0).getTextContent().trim();
-                    collection |= propstat.getElementsByTagNameNS("DAV:", "collection").getLength() > 0;
-                }
-                if (!success) continue;
-                if (self) {
-                    if (collection) result.directoryId = id;
-                    continue;
-                }
-                if (collection) {
-                    if (!url.encodedPath().endsWith("/")) url = url.newBuilder().addPathSegment("").build();
-                    result.folders.add(new Folder(url, id, 0));
-                } else if (Arrays.asList("image/jpeg", "image/png", "image/webp").contains(type)) {
-                    result.photos.add(new Photo(url, etag, id));
-                }
-            }
-            return result;
-        } catch (ParserConfigurationException | SAXException error) {
-            throw new IOException("Nextcloud returned an invalid WebDAV directory listing.");
-        }
-    }
-
-    private static void feature(DocumentBuilderFactory factory, String name, boolean value) {
-        try { factory.setFeature(name, value); } catch (ParserConfigurationException ignored) { /* resolver still denies external entities */ }
-    }
-
-    private static String value(Element element, String name) {
-        NodeList list = element.getElementsByTagNameNS("DAV:", name);
-        return list.getLength() == 0 ? "" : list.item(0).getTextContent().trim();
+        return DavListingReader.read(new ByteArrayInputStream(xml), directory, root);
     }
 
     static boolean within(HttpUrl url, HttpUrl root) {
@@ -290,16 +278,16 @@ final class DavClient implements AutoCloseable {
         return descendant(url, root);
     }
 
-    private static boolean directChild(HttpUrl url, HttpUrl directory) {
+    static boolean directChild(HttpUrl url, HttpUrl directory) {
         return descendant(url, directory) && pathLength(url) == pathLength(directory) + 1;
     }
 
-    private static int pathLength(HttpUrl url) {
+    static int pathLength(HttpUrl url) {
         int length = url.pathSize();
         return length > 0 && url.pathSegments().get(length - 1).isEmpty() ? length - 1 : length;
     }
 
-    private static String pathKey(HttpUrl url) {
+    static String pathKey(HttpUrl url) {
         // Paths have already passed within(): decoded segments contain no slash.
         // This also treats equivalent percent encodings and trailing slashes alike.
         StringBuilder key = new StringBuilder();
@@ -307,7 +295,7 @@ final class DavClient implements AutoCloseable {
         return key.toString();
     }
 
-    private static boolean descendant(HttpUrl url, HttpUrl directory) {
+    static boolean descendant(HttpUrl url, HttpUrl directory) {
         int length = pathLength(directory);
         if (pathLength(url) < length) return false;
         for (int i = 0; i < length; i++)

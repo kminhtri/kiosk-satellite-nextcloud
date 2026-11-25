@@ -19,6 +19,7 @@ public final class NextcloudPlugin implements KioskPlugin {
     private Session session;
     private NightMode night;
     private String folderMigrationWarning = "";
+    private String shuffleMigrationWarning = "";
     private boolean alive;
     private volatile boolean active, screenOn = true;
     private volatile String view;
@@ -63,6 +64,7 @@ public final class NextcloudPlugin implements KioskPlugin {
         synchronized (lock) {
             if (!alive) return;
             folderMigrationWarning = "";
+            shuffleMigrationWarning = "";
             try {
                 Map<String, Object> patch = FolderSettings.migration(settings);
                 if (!patch.isEmpty()) {
@@ -79,13 +81,24 @@ public final class NextcloudPlugin implements KioskPlugin {
                 if (!"Albums".equals(Config.text(settings, "photoSource", "Folders")))
                     folderMigrationWarning = "Could not import the old folder selection. Check the Photo folders list before using folders.";
             }
+            if (settings.containsKey("shuffleMode")) {
+                Map<String, Object> patch = ShuffleMode.migration(settings);
+                if (!patch.isEmpty()) {
+                    try { host.updateSettings(patch); }
+                    catch (UnsupportedOperationException | IllegalStateException | LinkageError error) {
+                        shuffleMigrationWarning = "Update Kiosk Satellite to save the migrated Shuffle mode.";
+                    }
+                    settings = new HashMap<>(settings); settings.putAll(patch);
+                }
+            }
             if (night != null) night.configure(settings);
             if (session != null) { session.close(); session = null; }
             try {
                 Config config = new Config(settings);
                 session = new Session(config);
                 host.publishScreensaver("photos", TITLE, Renderer.message("Waiting for Nextcloud Photo Frame to start…"));
-                host.status("Ready. Photos load when this screensaver is visible." + (folderMigrationWarning.isEmpty() ? "" : " " + folderMigrationWarning), !folderMigrationWarning.isEmpty());
+                String warning = (folderMigrationWarning + " " + shuffleMigrationWarning).trim();
+                host.status("Ready. Photos load when this screensaver is visible." + (warning.isEmpty() ? "" : " " + warning), !warning.isEmpty());
                 session.start();
             } catch (IllegalArgumentException error) {
                 host.publishScreensaver("photos", TITLE, Renderer.message(error.getMessage()));
@@ -142,22 +155,20 @@ public final class NextcloudPlugin implements KioskPlugin {
         final DavClient dav;
         final ScheduledExecutorService worker;
         final LinkedHashMap<String, byte[]> cache = new LinkedHashMap<>(16, .75f, true);
-        final Random random = new Random();
-        List<DavClient.Photo> photos = new ArrayList<>();
-        List<DavClient.Photo> cycle = new ArrayList<>();
-        int cursor;
+        final PhotoPlaylist playlist;
         String current;
         volatile boolean refresh = true, advance, resetDwell;
         volatile boolean closed;
         volatile boolean running;
         volatile long activityRevision;
         private ScheduledFuture<?> loop;
-        long refreshAt, nextAt, networkRetryAt, processingRetryAt;
+        long refreshAt, nextAt, networkRetryAt, processingRetryAt, cacheSelectionVersion = -1;
 
         Session(Config config) {
             this.config = config;
             dav = new DavClient(config);
-            dav.setActive(false);
+            playlist = new PhotoPlaylist(dav, config.shuffleMode, new Random());
+            playlist.setActive(false);
             worker = Executors.newSingleThreadScheduledExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "NextcloudPhotoFrame");
                 thread.setDaemon(true);
@@ -173,7 +184,7 @@ public final class NextcloudPlugin implements KioskPlugin {
             boolean visible = !closed && active && screenOn && VIEW.equals(view);
             if (running == visible) return;
             if (visible) {
-                dav.setActive(true);
+                playlist.setActive(true);
                 activityRevision++;
                 resetDwell = true;
                 running = true;
@@ -181,7 +192,7 @@ public final class NextcloudPlugin implements KioskPlugin {
             } else {
                 running = false;
                 activityRevision++;
-                dav.setActive(false);
+                playlist.setActive(false);
                 if (loop != null) loop.cancel(false);
                 loop = null;
             }
@@ -195,20 +206,23 @@ public final class NextcloudPlugin implements KioskPlugin {
             if (!working(revision) || now() < processingRetryAt) return;
             try {
                 long now = now();
+                updateIndex(revision);
                 if (refresh || now >= refreshAt) {
+                    boolean full = refresh;
                     refresh = false;
                     try {
-                        List<DavClient.Photo> listed = dav.list();
+                        if (current == null) {
+                            String loading = "Loading the first available album/folder…";
+                            publish(Renderer.message(loading)); report(loading, false);
+                        }
+                        playlist.refresh(full);
                         if (!working(revision)) { refresh = true; return; }
-                        photos = listed;
-                        Set<String> valid = new HashSet<>();
-                        for (DavClient.Photo photo : photos) valid.add(photo.key());
-                        cache.keySet().retainAll(valid);
-                        cycle.clear(); cursor = 0;
+                        if (current != null) playlist.beginIndexing();
+                        syncCache();
                         refreshAt = now() + config.refreshMinutes * 60_000L;
                         networkRetryAt = 0;
-                        report(photos.isEmpty() ? "No JPEG, PNG or WebP photos found in the selected sources." : photos.size() + " photos available.", photos.isEmpty());
-                        if (photos.isEmpty()) {
+                        report(playlist.isEmpty() ? "No JPEG, PNG or WebP photos found in the selected sources." : playlist.size() + " photos available.", playlist.isEmpty());
+                        if (playlist.isEmpty()) {
                             current = null;
                             publish(Renderer.message("No JPEG, PNG or WebP photos found in the selected sources."));
                         }
@@ -219,31 +233,36 @@ public final class NextcloudPlugin implements KioskPlugin {
                         if (current == null) publish(Renderer.message(connectionError(error)));
                     }
                 }
-                if (!working(revision) || photos.isEmpty()) return;
+                updateIndex(revision);
+                if (!working(revision) || playlist.isEmpty()) return;
                 if (resetDwell) { resetDwell = false; nextAt = now() + config.seconds * 1000L; }
                 boolean forced = advance;
                 advance = false;
                 if (current == null || forced || (active && screenOn && now() >= nextAt)) {
-                    DavClient.Photo candidate = next();
-                    byte[] image = cachedOrDownload(candidate, revision);
+                    DavClient.Photo candidate = playlistPhoto(true, revision);
+                    String imageKey = candidate == null ? null : candidate.key();
+                    byte[] image = candidate == null ? null : cachedOrDownload(candidate, revision);
                     if (!working(revision)) return;
                     if (image == null) {
                         // Continue rotating the bounded cache while the server is unavailable.
-                        for (int i = 0; i < photos.size(); i++) {
-                            candidate = next();
-                            image = cache.get(candidate.key());
-                            if (image != null && !candidate.key().equals(current)) break;
+                        for (Map.Entry<String, byte[]> entry : cache.entrySet()) {
+                            imageKey = entry.getKey(); image = entry.getValue();
+                            if (!imageKey.equals(current)) break;
                         }
+                        // Touch after iteration so offline fallback rotates through the LRU cache.
+                        if (image != null) cache.get(imageKey);
                     }
                     if (image != null) {
                         publish(Renderer.photo(image, config.fill));
-                        current = candidate.key();
+                        current = imageKey;
                     }
                     nextAt = now() + (image == null ? 30_000 : config.seconds * 1000L);
+                    // Give the first image request priority, but don't stall indexing if that image failed.
+                    playlist.beginIndexing();
                 }
                 if (working(revision) && current != null) {
-                    ensureCycle();
-                    cachedOrDownload(cycle.get(cursor), revision);
+                    DavClient.Photo upcoming = playlistPhoto(false, revision);
+                    if (upcoming != null) cachedOrDownload(upcoming, revision);
                 }
             } catch (OutOfMemoryError error) {
                 // Release the largest retained buffers before calling the host.
@@ -251,7 +270,7 @@ public final class NextcloudPlugin implements KioskPlugin {
                 cache.clear();
                 processingRetryAt = now() + 30_000;
                 nextAt = processingRetryAt;
-                if (photos.isEmpty()) refresh = true;
+                if (playlist.isEmpty()) refresh = true;
                 try { if (working(revision)) report(MEMORY_WARNING, true); }
                 catch (OutOfMemoryError ignored) { /* the next scheduled tick may recover */ }
             } catch (RuntimeException error) {
@@ -263,15 +282,50 @@ public final class NextcloudPlugin implements KioskPlugin {
             }
         }
 
-        private void ensureCycle() {
-            if (cursor < cycle.size()) return;
-            cycle = new ArrayList<>(photos);
-            if (config.shuffle) Collections.shuffle(cycle, random);
-            cursor = 0;
-            if (cycle.size() > 1 && cycle.get(0).key().equals(current)) Collections.swap(cycle, 0, 1);
+        private boolean syncCache() {
+            if (cacheSelectionVersion == playlist.selectionVersion()) return false;
+            if (!playlist.perSource()) {
+                Set<String> valid = new HashSet<>();
+                for (DavClient.Photo photo : playlist.activePhotos()) valid.add(photo.key());
+                cache.keySet().retainAll(valid);
+            }
+            cacheSelectionVersion = playlist.selectionVersion();
+            return true;
         }
 
-        private DavClient.Photo next() { ensureCycle(); return cycle.get(cursor++); }
+        private void updateIndex(long revision) {
+            if (!working(revision)) return;
+            boolean changed = playlist.maintain(now());
+            if (!working(revision)) return;
+            IOException error = playlist.takeIndexError();
+            if (error != null) report("Background photo indexing failed.", true);
+            else if (changed) report(playlist.size() + " photos available.", false);
+        }
+
+        private DavClient.Photo playlistPhoto(boolean consume, long revision) {
+            if (!working(revision) || (playlist.needsNetwork() && now() < networkRetryAt)) return null;
+            try {
+                DavClient.Photo photo = consume ? playlist.next() : playlist.peek();
+                if (!working(revision)) return null;
+                boolean changed = syncCache();
+                if (changed) {
+                    if (current != null) playlist.beginIndexing();
+                    report(playlist.size() + " photos available.", false);
+                }
+                if (photo == null && playlist.isEmpty()) {
+                    cache.clear(); current = null;
+                    report("No JPEG, PNG or WebP photos found in the selected sources.", true);
+                    publish(Renderer.message("No JPEG, PNG or WebP photos found in the selected sources."));
+                }
+                return photo;
+            } catch (IOException error) {
+                if (!working(revision)) return null;
+                networkRetryAt = now() + 30_000;
+                report(connectionError(error), true);
+                if (current == null) publish(Renderer.message(connectionError(error)));
+                return null;
+            }
+        }
 
         private byte[] cachedOrDownload(DavClient.Photo photo, long revision) {
             if (!working(revision)) return null;
@@ -282,7 +336,7 @@ public final class NextcloudPlugin implements KioskPlugin {
                 if (!working(revision)) return null;
                 cache.put(photo.key(), image);
                 while (cache.size() > config.cachePhotos) cache.remove(cache.keySet().iterator().next());
-                report(photos.size() + " photos available; " + cache.size() + " cached.", false);
+                report(playlist.size() + " photos available; " + cache.size() + " cached.", false);
                 return image;
             } catch (IOException error) {
                 if (!working(revision)) return null;
@@ -294,11 +348,7 @@ public final class NextcloudPlugin implements KioskPlugin {
         }
 
         private String connectionError(IOException error) {
-            String message = error.getMessage();
-            // Only messages produced by our client are suitable for the settings page.
-            return message != null && (message.startsWith("Nextcloud ") || message.startsWith("Photo limit")
-                    || message.startsWith("Folder limit") || message.startsWith("Unsupported or damaged"))
-                    ? message : "Cannot load Nextcloud photos. Check the connection and HTTPS certificate. Retrying in 30 seconds.";
+            return ErrorMessages.connection(error);
         }
 
         private void publish(String html) {
@@ -316,7 +366,10 @@ public final class NextcloudPlugin implements KioskPlugin {
                     try {
                         String warning = night == null ? "" : night.warning();
                         if (!folderMigrationWarning.isEmpty()) warning = (warning.isEmpty() ? "" : warning + " ") + folderMigrationWarning;
-                        host.status(warning.isEmpty() ? message : message + " " + warning, error || !warning.isEmpty());
+                        if (!shuffleMigrationWarning.isEmpty()) warning = (warning.isEmpty() ? "" : warning + " ") + shuffleMigrationWarning;
+                        String note = playlist.note();
+                        String full = message + (note.isEmpty() ? "" : " " + note);
+                        host.status(warning.isEmpty() ? full : full + " " + warning, error || !warning.isEmpty() || playlist.globalFallback() || playlist.indexFailed());
                     }
                     catch (IllegalStateException ignored) { /* revoked session */ }
                 }
@@ -328,7 +381,7 @@ public final class NextcloudPlugin implements KioskPlugin {
             running = false;
             activityRevision++;
             worker.shutdownNow();
-            dav.close();
+            playlist.close();
         }
     }
 }

@@ -24,6 +24,10 @@ public final class NextcloudTest {
         multipleFolders();
         albumSources();
         previewFallback();
+        LargeLibraryTest.run();
+        ShuffleTest.run();
+        FolderScanTest.run();
+        ProgressiveStartTest.run();
         TimeoutTest.run();
         NightModeTest.run();
         FolderSettingsTest.run();
@@ -220,7 +224,7 @@ public final class NextcloudTest {
             try (DavClient client = new DavClient(new Config(values))) { check(client.list().isEmpty(), "empty albums return an empty slideshow"); }
             fixture.directoryListing = path -> {
                 StringBuilder entries = new StringBuilder();
-                int count = path.equals(first) ? 2500 : 2501;
+                int count = path.equals(first) ? DavClient.MAX_PHOTOS / 2 : DavClient.MAX_PHOTOS / 2 + 1;
                 for (int i = 0; i < count; i++) entries.append(entry(path + i + ".jpg", false, "image/jpeg", "", (path.equals(first) ? "a" : "b") + i));
                 return listing(entries.toString());
             };
@@ -389,7 +393,7 @@ public final class NextcloudTest {
             try {
                 client.list();
                 throw new AssertionError("oversized listing must exceed listing cap");
-            } catch (IOException expected) { check(expected.getMessage().equals(DavClient.LIST_SIZE_ERROR), "oversized listing identifies the distinct 4 MiB XML limit"); }
+            } catch (IOException expected) { check(expected.getMessage().equals(DavClient.LIST_SIZE_ERROR), "oversized listing identifies the distinct XML size limit"); }
             finally { fixture.oversizedListing = false; }
             fixture.mode = 401;
             expectFailure(client::list, "authentication failure");
@@ -649,6 +653,7 @@ public final class NextcloudTest {
         final Set<String> missingPaths = Collections.synchronizedSet(new HashSet<>());
         final AtomicInteger badAgent = new AtomicInteger();
         volatile java.util.function.Function<String, String> directoryListing;
+        volatile java.util.function.Function<String, InputStream> streamedListing;
         volatile int mode;
         volatile boolean failImages;
         volatile boolean oversizedImage;
@@ -659,6 +664,8 @@ public final class NextcloudTest {
         volatile boolean oversizedPreview, invalidPreviewType, chunkedImage;
         volatile CountDownLatch block, entered;
         volatile boolean blockPreview;
+        volatile String blockedPathSuffix;
+        volatile long blockSeconds = 8;
         final String root = "/remote.php/dav/files/alice/Photos/";
         Fixture() throws IOException {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -673,9 +680,10 @@ public final class NextcloudTest {
                 if (!Credentials.basic("alice", "test-password").equals(exchange.getRequestHeaders().getFirst("Authorization"))) badAuth.incrementAndGet();
                 if (!("KioskSatellite-NextcloudPhotoFrame/" + BuildInfo.VERSION).equals(exchange.getRequestHeaders().getFirst("User-Agent"))) badAgent.incrementAndGet();
                 CountDownLatch gate = block;
-                if (gate != null && (!blockPreview || exchange.getRequestURI().getPath().endsWith("/index.php/core/preview"))) {
+                if (gate != null && (!blockPreview || exchange.getRequestURI().getPath().endsWith("/index.php/core/preview"))
+                        && (blockedPathSuffix == null || exchange.getRequestURI().getPath().endsWith(blockedPathSuffix))) {
                     entered.countDown();
-                    try { gate.await(8, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    try { gate.await(blockSeconds, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 }
                 if (mode != 0) {
                     if (mode == 302) exchange.getResponseHeaders().set("Location", url() + "/redirect-target");
@@ -697,6 +705,15 @@ public final class NextcloudTest {
                     propfinds.incrementAndGet();
                     listedPaths.add(path);
                     if (!"1".equals(exchange.getRequestHeaders().getFirst("Depth"))) badDepth.incrementAndGet();
+                    if (streamedListing != null) {
+                        exchange.sendResponseHeaders(207, 0);
+                        try (InputStream input = streamedListing.apply(path)) {
+                            byte[] buffer = new byte[8192];
+                            int received;
+                            while ((received = input.read(buffer)) != -1) exchange.getResponseBody().write(buffer, 0, received);
+                        }
+                        return;
+                    }
                     String xml = directoryListing != null ? directoryListing.apply(path) : path.equals(root) ? listing(entry(root, true, "", "") + entry(root + "a.jpg", false, "image/jpeg", "a1")
                             + entry(root + "b.png", false, "image/png", "b1") + entry(root + "c.webp", false, "image/webp", "c1")
                             + entry(root + "sub/", true, "", ""))

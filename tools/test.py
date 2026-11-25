@@ -52,6 +52,7 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-test-') as directory:
     # any accidental unrelocated reference, just as it does in Android's loader.
     subprocess.run([tool('java'), '-ea', '-cp', runtime, 'io.github.kiosknextcloud.IsolationProbe'], check=True)
     subprocess.run([tool('java'), '-ea', '-cp', runtime, 'io.github.kiosknextcloud.NextcloudTest'], check=True)
+    subprocess.run([tool('java'), '-Xmx64m', '-ea', '-cp', runtime, 'io.github.kiosknextcloud.LargeLibraryTest'], check=True)
 
 subprocess.run([sys.executable, str(root / 'tools/test_android_sdk.py')], check=True)
 

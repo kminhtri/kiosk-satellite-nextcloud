@@ -6,11 +6,13 @@ import okhttp3.HttpUrl;
 import okhttp3.Credentials;
 
 final class Config {
+    static final int DEFAULT_COLLECTION_LIMIT = 1000, MAX_COLLECTION_LIMIT = 10000;
     final HttpUrl folder, preview;
     final List<HttpUrl> folders, albums;
     final String authorization;
-    final boolean recursive, shuffle, fill;
-    final int seconds, refreshMinutes, cachePhotos;
+    final boolean recursive, fill;
+    final ShuffleMode shuffleMode;
+    final int seconds, refreshMinutes, cachePhotos, maxCollections;
 
     Config(Map<String, Object> values) {
         String server = text(values, "serverUrl", "");
@@ -63,11 +65,12 @@ final class Config {
             throw new IllegalArgumentException("Select at most 32 folders and albums in total.");
         authorization = Credentials.basic(username, password, java.nio.charset.StandardCharsets.UTF_8);
         recursive = useFolders && Boolean.TRUE.equals(values.get("includeSubfolders"));
-        shuffle = !Boolean.FALSE.equals(values.get("shuffle"));
+        shuffleMode = ShuffleMode.read(values);
         fill = "Fill".equals(values.get("fit"));
         seconds = number(values, "secondsPerPhoto", 30, 5, 600);
         refreshMinutes = number(values, "refreshMinutes", 15, 1, 1440);
         cachePhotos = number(values, "cachePhotos", 12, 2, 30);
+        maxCollections = number(values, "maxCollections", DEFAULT_COLLECTION_LIMIT, 100, MAX_COLLECTION_LIMIT);
     }
 
     private static HttpUrl folderUrl(HttpUrl.Builder home, String path) {

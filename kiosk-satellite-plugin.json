@@ -176,10 +176,25 @@
       "title": "Include subfolders",
       "default": false,
       "group": "Photo sources",
-      "description": "Applies only to Files folders; albums are never traversed recursively. Up to 20 levels, 100 collections and 5000 unique photos per refresh, with loop detection.",
+      "description": "Applies only to Files folders; albums are never traversed recursively. Up to 20 levels, with loop detection. Adjust Folder and album scan limit for large trees. Global shuffle: max 20000 photos total; larger libraries play one collection at a time, max 20000 photos each.",
       "visibleWhen": {
         "key": "photoSource",
         "notEquals": "Albums"
+      }
+    },
+    {
+      "key": "maxCollections",
+      "type": "number",
+      "title": "Folder and album scan limit",
+      "default": 1000,
+      "min": 100,
+      "max": 10000,
+      "step": 100,
+      "group": "Photo sources",
+      "description": "Maximum collections in a full traversal, including selected folders/albums, subfolders and empty folders. Larger limits allow bigger folder trees but can make scans slower. Loop detection and the 20-level depth limit still apply.",
+      "visibleWhen": {
+        "key": "includeSubfolders",
+        "equals": true
       }
     },
     {
@@ -195,12 +210,51 @@
       "unit": "s"
     },
     {
+      "key": "shuffleMode",
+      "type": "select",
+      "title": "Shuffle mode",
+      "default": "Across all sources (up to 20000)",
+      "group": "Slideshow",
+      "description": "Off keeps source/photo order. Within shuffles each album/folder separately. Global shuffle supports up to 20000 photos TOTAL; above that it falls back to Within. Each album/folder is limited to 20000 photos. Playback starts with the first available source while indexing; global shuffle begins after the current photo.",
+      "options": [
+        "Off",
+        "Within each source",
+        "Across all sources (up to 20000)"
+      ]
+    },
+    {
+      "key": "shuffleModeVersion",
+      "type": "number",
+      "title": "Shuffle settings schema",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "step": 1,
+      "group": "Slideshow",
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": [
+          "Folders",
+          "Albums",
+          "Folders and albums"
+        ]
+      }
+    },
+    {
       "key": "shuffle",
       "type": "boolean",
       "title": "Shuffle",
       "default": true,
       "group": "Slideshow",
-      "description": "Play a shuffled cycle without repeating until the cycle ends."
+      "description": "Legacy shuffle switch retained to migrate existing installations.",
+      "visibleWhen": {
+        "key": "photoSource",
+        "notEquals": [
+          "Folders",
+          "Albums",
+          "Folders and albums"
+        ]
+      }
     },
     {
       "key": "fit",
